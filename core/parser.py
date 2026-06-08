@@ -13,6 +13,7 @@ Supports:
 - If/then/else/end conditionals
 - While loops
 - For loops
+- Repeat/times loops
 """
 
 from typing import Any, Dict, List, Optional, Union
@@ -113,6 +114,13 @@ class ForNode:
 
 
 @dataclass
+class RepeatNode:
+    """AST node for repeat loops: repeat N times ... end"""
+    count: Any
+    body: List[Any]
+
+
+@dataclass
 class ProgramNode:
     """AST node for the entire program."""
     statements: List[Any]
@@ -194,6 +202,8 @@ class Parser:
             return self.parse_while()
         elif token.type == TokenType.FOR:
             return self.parse_for()
+        elif token.type == TokenType.REPEAT:
+            return self.parse_repeat()
         else:
             raise ParseError(f"Unexpected token: {token.type.name}", token)
     
@@ -289,6 +299,24 @@ class Parser:
         
         return ForNode(var_token.value, iterable, body)
     
+    def parse_repeat(self) -> RepeatNode:
+        """Parse a repeat loop: repeat <number> times ... end"""
+        self.advance()  # Skip 'repeat'
+
+        self.skip_newlines()
+        count = self.parse_expression()
+
+        self.skip_newlines()
+        self.expect(TokenType.TIMES, "Expected 'times' after repeat count")
+
+        self.skip_newlines()
+        body = self.parse_block()
+
+        self.skip_newlines()
+        self.expect(TokenType.END, "Expected 'end' to close repeat loop")
+
+        return RepeatNode(count, body)
+
     def parse_block(self) -> List[Any]:
         """Parse a block of statements until 'end', 'else', or EOF."""
         statements = []
@@ -462,6 +490,8 @@ class Interpreter:
             self.execute_while(node)
         elif isinstance(node, ForNode):
             self.execute_for(node)
+        elif isinstance(node, RepeatNode):
+            self.execute_repeat(node)
         else:
             raise RuntimeError(f"Unknown statement type: {type(node).__name__}")
     

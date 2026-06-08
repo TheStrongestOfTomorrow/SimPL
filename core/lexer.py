@@ -60,6 +60,8 @@ class TokenType(Enum):
     RPAREN = auto()
     COMMA = auto()
     COLON = auto()
+    LBRACE = auto()
+    RBRACE = auto()
     
     # Special
     NEWLINE = auto()
@@ -112,6 +114,7 @@ class Lexer:
     
     Converts source code string into a list of Token objects.
     Designed to be extensible for different syntax flavor packs.
+    Includes a Normalizer step for C-style {} and Python-style : syntax.
     """
     
     def __init__(self, source: str):
@@ -120,6 +123,62 @@ class Lexer:
         self.line = 1
         self.column = 1
         self.tokens: List[Token] = []
+    
+    def normalize_source(self) -> str:
+        """
+        Normalize source code to handle different syntax flavors.
+        
+        Flavor detection rules:
+        - If a line ends with '{', treat it as start of block (like 'then' or 'do')
+        - If a line ends with '}', treat it as 'end'
+        - If a line ends with ':', treat it as 'then'
+        
+        This allows C-style or Python-style hints to be translated to Standard SimPL.
+        """
+        lines = self.source.split('\n')
+        normalized_lines = []
+        
+        for i, line in enumerate(lines):
+            stripped = line.rstrip()
+            
+            # Check if line ends with { (C-style block start)
+            if stripped.endswith('{'):
+                # Remove the { and add appropriate keyword based on context
+                line_content = stripped[:-1].rstrip()
+                # Detect what kind of statement this is
+                if 'if ' in line_content or line_content.startswith('if'):
+                    normalized_lines.append(line_content + ' then')
+                elif 'while ' in line_content or line_content.startswith('while'):
+                    normalized_lines.append(line_content + ' do')
+                elif 'for ' in line_content or line_content.startswith('for'):
+                    normalized_lines.append(line_content + ' do')
+                elif 'repeat ' in line_content or line_content.startswith('repeat'):
+                    normalized_lines.append(line_content + ' do')
+                else:
+                    normalized_lines.append(line_content + ' then')
+            # Check if line ends with } (C-style block end)
+            elif stripped.endswith('}'):
+                normalized_lines.append(stripped[:-1].rstrip() + ' end')
+            # Check if line ends with : (Python-style)
+            elif stripped.endswith(':'):
+                line_content = stripped[:-1].rstrip()
+                # Detect what kind of statement this is
+                if 'if ' in line_content or line_content.startswith('if'):
+                    normalized_lines.append(line_content + ' then')
+                elif 'while ' in line_content or line_content.startswith('while'):
+                    normalized_lines.append(line_content + ' do')
+                elif 'for ' in line_content or line_content.startswith('for'):
+                    normalized_lines.append(line_content + ' do')
+                elif 'repeat ' in line_content or line_content.startswith('repeat'):
+                    normalized_lines.append(line_content + ' do')
+                elif 'else' in line_content or line_content == 'else':
+                    normalized_lines.append(line_content)
+                else:
+                    normalized_lines.append(line_content + ' then')
+            else:
+                normalized_lines.append(line)
+        
+        return '\n'.join(normalized_lines)
     
     def current_char(self) -> Optional[str]:
         """Get the current character or None if at end."""
@@ -238,9 +297,16 @@ class Lexer:
         """
         Convert source code into a list of tokens.
         
+        First normalizes the source to handle different syntax flavors,
+        then tokenizes the normalized source.
+        
         Returns:
             List of Token objects representing the source code.
         """
+        # Normalize source first (handle flavor packs)
+        normalized_source = self.normalize_source()
+        self.source = normalized_source
+        
         self.tokens = []
         
         while self.current_char() is not None:
@@ -324,6 +390,10 @@ class Lexer:
                 self.tokens.append(Token(TokenType.COMMA, ',', self.line, self.column))
             elif char == ':':
                 self.tokens.append(Token(TokenType.COLON, ':', self.line, self.column))
+            elif char == '{':
+                self.tokens.append(Token(TokenType.LBRACE, '{', self.line, self.column))
+            elif char == '}':
+                self.tokens.append(Token(TokenType.RBRACE, '}', self.line, self.column))
             else:
                 # Unknown character
                 self.tokens.append(Token(TokenType.UNKNOWN, char, self.line, self.column))
