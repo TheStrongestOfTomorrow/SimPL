@@ -204,8 +204,34 @@ class Parser:
             return self.parse_for()
         elif token.type == TokenType.REPEAT:
             return self.parse_repeat()
+        elif token.type == TokenType.FUNCTION:
+            return self.parse_function()
+        elif token.type == TokenType.IDENTIFIER:
+            # Could be an assignment (identifier = expression) or function call
+            return self.parse_assignment_or_call()
         else:
             raise ParseError(f"Unexpected token: {token.type.name}", token)
+    
+    def parse_assignment_or_call(self):
+        """Parse an assignment or function call statement."""
+        name_token = self.current_token()
+        name = name_token.value
+        self.advance()
+        
+        # Check if this is a function call with arguments: name(args)
+        if self.current_token() and self.current_token().type == TokenType.LPAREN:
+            # This is a function call - but we need to handle it as an expression
+            # For now, just skip this pattern (it should be handled in expressions)
+            raise ParseError(f"Function calls should be part of an expression", name_token)
+        
+        # Check for assignment: name = expression
+        if self.current_token() and self.current_token().type == TokenType.EQUALS:
+            self.advance()  # Skip '='
+            self.skip_newlines()
+            value = self.parse_expression()
+            return LetNode(name, value)
+        
+        raise ParseError(f"Unexpected identifier: {name}", name_token)
     
     def parse_let(self) -> LetNode:
         """Parse a let statement: let <name> = <expression>"""

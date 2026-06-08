@@ -33,6 +33,10 @@ class TokenType(Enum):
     WHILE = auto()
     FOR = auto()
     IN = auto()
+    REPEAT = auto()
+    TIMES = auto()
+    FUNCTION = auto()
+    RETURN = auto()
     
     # Literals
     NUMBER = auto()
@@ -93,6 +97,10 @@ KEYWORDS = {
     'while': TokenType.WHILE,
     'for': TokenType.FOR,
     'in': TokenType.IN,
+    'repeat': TokenType.REPEAT,
+    'times': TokenType.TIMES,
+    'function': TokenType.FUNCTION,
+    'return': TokenType.RETURN,
     'and': TokenType.AND,
     'or': TokenType.OR,
     'not': TokenType.NOT,

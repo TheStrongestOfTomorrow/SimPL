@@ -1,0 +1,37 @@
+# Test script for SimPL package manager
+# This demonstrates importing and using a library
+
+import super-math
+
+let x = 5
+let y = 10
+
+print "Testing super-math library:"
+
+# Use the imported library functions
+let sum = super-math.add(x, y)
+print "5 + 10 = " + sum
+
+let diff = super-math.subtract(y, x)
+print "10 - 5 = " + diff
+
+let prod = super-math.multiply(x, y)
+print "5 * 10 = " + prod
+
+let quot = super-math.divide(y, x)
+print "10 / 5 = " + quot
+
+let pow = super-math.power(2, 8)
+print "2^8 = " + pow
+
+let maximum = super-math.max(42, 17)
+print "max(42, 17) = " + maximum
+
+let minimum = super-math.min(42, 17)
+print "min(42, 17) = " + minimum
+
+print ""
+print "All tests completed!"
+
+# Deliberate error to show Smart Helper
+print undefined-variable
