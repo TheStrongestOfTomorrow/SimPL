@@ -1,0 +1,33 @@
+# SimPL Hello World Example
+# This is a basic test script demonstrating core SimPL features
+
+print "Hello, World!"
+
+let x = 10
+let y = 20
+
+print "x is:"
+print x
+print "y is:"
+print y
+
+print "x + y ="
+print x + y
+
+print "x * y ="
+print x * y
+
+# Conditional example
+if x < y then
+    print "x is less than y"
+end
+
+# Loop example
+let counter = 0
+while counter < 3 do
+    print "Counting..."
+    print counter
+    let counter = counter + 1
+end
+
+print "Done!"
