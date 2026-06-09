@@ -1,0 +1,120 @@
+# ============================================================
+# SimPL Full Feature Demo
+# Showcases every major language feature in one file.
+# Run: python simpl.py run examples/full_demo.simpl
+# ============================================================
+
+print "=== SimPL Language Demo ==="
+print ""
+
+# --- 1. Variables & Math ---
+let x = 42
+let y = 3.14
+let sum = x + y
+let mod = x % 5
+print "Math: " + str(x) + " + " + str(y) + " = " + str(sum)
+print "Modulo: 42 % 5 = " + str(mod)
+
+# --- 2. String Operations ---
+let greeting = "Hello" + " " + "SimPL!"
+print "Concat: " + greeting
+print "Upper: " + upper(greeting)
+print "Lower: " + lower(greeting)
+print "Length: " + str(len(greeting))
+print "Replace: " + replace(greeting, "SimPL", "World")
+
+# --- 3. Lists ---
+let fruits = ["apple", "banana", "cherry"]
+print "List: " + str(fruits)
+print "First: " + fruits[0]
+print "Count: " + str(len(fruits))
+push(fruits, "date")
+print "After push: " + str(fruits)
+let last = pop(fruits)
+print "Popped: " + last
+print "After pop: " + str(fruits)
+
+# --- 4. Range ---
+let nums = range(1, 6)
+print "Range 1-5: " + str(nums)
+
+# --- 5. For Loop ---
+print "Counting:"
+for i in range(5) do
+    print "  " + str(i)
+end
+
+# --- 6. While Loop with Break ---
+let n = 0
+while n < 100 do
+    if n == 5 then
+        break
+    end
+    let n = n + 1
+end
+print "Broke at: " + str(n)
+
+# --- 7. Continue in Loop ---
+print "Odds:"
+for i in range(6) do
+    if i % 2 == 0 then
+        continue
+    end
+    print "  " + str(i)
+end
+
+# --- 8. If / Elif / Else ---
+let grade = 85
+if grade >= 90 then
+    print "Grade: A"
+elif grade >= 80 then
+    print "Grade: B"
+elif grade >= 70 then
+    print "Grade: C"
+else
+    print "Grade: F"
+end
+
+# --- 9. Function Definitions ---
+function greet(name)
+    return "Hello, " + name + "!"
+end
+
+function factorial(n)
+    if n <= 1 then
+        return 1
+    end
+    return n * factorial(n - 1)
+end
+
+function fib(n)
+    if n <= 0 then
+        return 0
+    elif n == 1 then
+        return 1
+    end
+    return fib(n - 1) + fib(n - 2)
+end
+
+print "Greet: " + greet("SimPL")
+print "5! = " + str(factorial(5))
+print "fib(8) = " + str(fib(8))
+
+# --- 10. Math Functions ---
+print "sqrt(144) = " + str(sqrt(144))
+print "pow(2, 10) = " + str(pow(2, 10))
+print "floor(3.7) = " + str(floor(3.7))
+print "ceil(3.2) = " + str(ceil(3.2))
+print "abs(-42) = " + str(abs(-42))
+
+# --- 11. Type Checking ---
+print "type(42) = " + type(42)
+print "type('hi') = " + type("hi")
+print "type([1,2]) = " + type([1, 2])
+
+# --- 12. NPM Bridge (if Node.js available) ---
+let js_result = js_eval("2 ** 10")
+print "js_eval('2 ** 10') = " + str(js_result)
+
+print ""
+print "=== Demo Complete! ==="

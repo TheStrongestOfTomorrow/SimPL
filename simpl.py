@@ -24,13 +24,13 @@ import argparse
 # Add the current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.lexer import Lexer, tokenize
+from core.lexer import Lexer, tokenize, MixedFlavorError
 from core.parser import Parser, Interpreter, parse_and_execute, ParseError, RuntimeError as SimPLRuntimeError
 from core.helper import SmartHelper, handle_error, get_helper
 from package_manager import install_package, uninstall_package, list_installed_packages
 
 
-VERSION = "0.2.0"
+VERSION = "0.4.0"
 
 
 def load_source_file(filepath: str) -> str:
@@ -46,6 +46,7 @@ def resolve_imports(source: str, libs_dir: str = './libs') -> str:
     """
     Pre-process source code to resolve import statements.
     Replaces 'import <package>' with the contents of the package file.
+    Also handles 'import npm:<package>' for NPM Bridge packages.
     
     Args:
         source: The source code with import statements.
@@ -63,7 +64,40 @@ def resolve_imports(source: str, libs_dir: str = './libs') -> str:
     for line in lines:
         stripped = line.strip()
         
-        # Check for import statement: import <package-name>
+        # Check for NPM import statement: import npm:<package-name>
+        npm_import_match = re.match(r'^import\s+npm:([a-zA-Z0-9_][a-zA-Z0-9_.-]*)\s*$', stripped)
+        
+        if npm_import_match:
+            npm_name = npm_import_match.group(1)
+            package_key = f'npm:{npm_name}'
+            
+            if package_key in imported_packages:
+                # Skip duplicate imports
+                continue
+            
+            imported_packages.add(package_key)
+            
+            # Look for the NPM wrapper file: libs/npm_<name>/npm_<name>.simpl
+            npm_dir_name = f'npm_{npm_name}'
+            wrapper_file = os.path.join(libs_dir, npm_dir_name, f'{npm_dir_name}.simpl')
+            
+            if os.path.exists(wrapper_file):
+                try:
+                    with open(wrapper_file, 'r', encoding='utf-8') as f:
+                        wrapper_code = f.read()
+                    
+                    resolved_lines.append(f'# === Imported NPM: {npm_name} ===')
+                    resolved_lines.extend(wrapper_code.split('\n'))
+                    resolved_lines.append(f'# === End NPM: {npm_name} ===')
+                except Exception as e:
+                    print(f"⚠️  Warning: Could not load NPM wrapper for '{npm_name}': {e}")
+            else:
+                print(f"🛑 Error: NPM package '{npm_name}' is not installed.")
+                print(f"   💡 Tip: Run 'python simpl.py install npm:{npm_name}' to install it.")
+                resolved_lines.append(line)
+            continue
+        
+        # Check for regular import statement: import <package-name>
         import_match = re.match(r'^import\s+([a-zA-Z][a-zA-Z0-9_-]*)\s*$', stripped)
         
         if import_match:
@@ -136,18 +170,20 @@ def run_script(source: str, show_tokens: bool = False) -> int:
         
         return 0
         
+    except MixedFlavorError as e:
+        # Handle mixed flavor errors
+        print(str(e))
+        return 1
+        
     except ParseError as e:
-        # Handle parser errors with friendly messages
         print(handle_error(e, source))
         return 1
         
     except SimPLRuntimeError as e:
-        # Handle runtime errors with friendly messages
         print(handle_error(e, source, getattr(e, 'line', None)))
         return 1
         
     except Exception as e:
-        # Handle unexpected errors
         print(handle_error(e, source))
         return 1
 
@@ -229,6 +265,8 @@ def repl_mode():
                 print("  print x          - Print a value")
                 print("  if x > 5 then ... end  - Conditional")
                 print("  while x > 0 do ... end - Loop")
+                print("  function f(x) ... end  - Define function")
+                print("  js_eval('1+2')   - NPM Bridge")
                 print("  exit             - Exit REPL")
                 print()
                 continue
@@ -255,7 +293,8 @@ def main():
         epilog="""
 Commands:
   run <script.simpl>              Run a SimPL script
-  install <package-name>          Install a package from GitHub Issues
+  install <package-name>          Install a SimPL package from GitHub Issues
+  install npm:<package-name>      Install an NPM package (JS Bridge)
   uninstall <package-name>        Uninstall a package
   list                            List installed packages
   
@@ -268,9 +307,15 @@ Options:
 
 Examples:
   python simpl.py run hello.simpl           Run a script
-  python simpl.py install super-math        Install a package
+  python simpl.py install super-math        Install a SimPL package
+  python simpl.py install npm:lodash        Install an NPM package (JS Bridge)
   python simpl.py --check hello.simpl       Check for errors
   python simpl.py --repl                    Interactive mode
+
+Syntax Flavors:
+  Standard:  if x > 5 then ... end
+  C/JS:      if (x > 5) { ... }
+  Python:    if x > 5: (indent-based)
         """
     )
     
@@ -368,15 +413,9 @@ Examples:
             print("Usage: python simpl.py install <package-name>")
             return 1
         
-        # Check for npm: prefix (future feature placeholder)
-        if args.target.startswith('npm:'):
-            package_name = args.target[4:]
-            print(f"⚠️  NPM bridge is not yet implemented.")
-            print(f"   Requested package: {package_name}")
-            print(f"   This will be available in a future version.")
-            return 1
-        
-        return 0 if install_package(args.target, mock=args.mock) else 1
+        # install_package handles the npm: prefix internally via the NPM Bridge
+        result = install_package(args.target, mock=args.mock)
+        return 0 if result else 1
     
     elif args.command == 'uninstall':
         if not args.target:

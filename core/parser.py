@@ -7,13 +7,19 @@ It works with the lexer to provide a complete interpretation pipeline.
 Supports:
 - Variable declarations (let)
 - Print statements
-- Basic math operations (+, -, *, /)
+- Basic math operations (+, -, *, /, %)
 - Comparison operators (==, !=, <, >, <=, >=)
 - Logical operators (and, or, not)
-- If/then/else/end conditionals
-- While loops
+- If/then/else/end conditionals + elif chains
+- While loops with break/continue
 - For loops
 - Repeat/times loops
+- Function definitions with parameters and return
+- Function calls (built-in and user-defined)
+- List literals [1, 2, 3] and indexing arr[0]
+- Input function
+- String concatenation with +
+- NPM Bridge via js_eval()
 """
 
 from typing import Any, Dict, List, Optional, Union
@@ -42,7 +48,25 @@ class RuntimeError(Exception):
         super().__init__(f"Line {line}: {message}" if line else message)
 
 
+class BreakSignal(Exception):
+    """Signal for break statement in loops."""
+    pass
+
+
+class ContinueSignal(Exception):
+    """Signal for continue statement in loops."""
+    pass
+
+
+class ReturnSignal(Exception):
+    """Signal for return statement in functions."""
+    def __init__(self, value: Any = None):
+        self.value = value
+
+
+# ======================================================================
 # AST Node Types
+# ======================================================================
 
 @dataclass
 class NumberNode:
@@ -57,9 +81,22 @@ class StringNode:
 
 
 @dataclass
+class ListNode:
+    """AST node for list literals: [1, 2, 3]"""
+    elements: List[Any]
+
+
+@dataclass
 class IdentifierNode:
     """AST node for variable references."""
     name: str
+
+
+@dataclass
+class IndexNode:
+    """AST node for indexing: expr[index]"""
+    obj: Any
+    index: Any
 
 
 @dataclass
@@ -78,6 +115,13 @@ class UnaryOpNode:
 
 
 @dataclass
+class FunctionCallNode:
+    """AST node for function calls: name(arg1, arg2, ...)"""
+    name: str
+    arguments: List[Any]
+
+
+@dataclass
 class LetNode:
     """AST node for variable declarations."""
     name: str
@@ -91,11 +135,18 @@ class PrintNode:
 
 
 @dataclass
+class InputNode:
+    """AST node for input statements: input("prompt")"""
+    prompt: Any
+
+
+@dataclass
 class IfNode:
-    """AST node for if statements."""
+    """AST node for if statements with elif chains."""
     condition: Any
     then_block: List[Any]
     else_block: Optional[List[Any]] = None
+    elif_chains: Optional[List[tuple]] = None  # List of (condition, block)
 
 
 @dataclass
@@ -121,42 +172,72 @@ class RepeatNode:
 
 
 @dataclass
+class FunctionDefNode:
+    """AST node for function definitions."""
+    name: str
+    parameters: List[str]
+    body: List[Any]
+
+
+@dataclass
+class ReturnNode:
+    """AST node for return statements."""
+    value: Any
+
+
+@dataclass
+class BreakNode:
+    """AST node for break statements."""
+    pass
+
+
+@dataclass
+class ContinueNode:
+    """AST node for continue statements."""
+    pass
+
+
+@dataclass
 class ProgramNode:
     """AST node for the entire program."""
     statements: List[Any]
 
 
+# ======================================================================
+# Parser
+# ======================================================================
+
 class Parser:
     """
     Parser for SimPL source code.
-    
+
     Converts a list of tokens into an Abstract Syntax Tree (AST).
     Uses recursive descent parsing approach.
     """
-    
+
     def __init__(self, tokens: List[Token]):
         self.tokens = tokens
         self.pos = 0
-    
+
     def current_token(self) -> Token:
         """Get the current token."""
         if self.pos >= len(self.tokens):
-            return self.tokens[-1]  # Return EOF
+            return self.tokens[-1]
         return self.tokens[self.pos]
-    
+
     def peek_token(self, offset: int = 1) -> Token:
         """Look ahead at tokens without advancing."""
         peek_pos = self.pos + offset
         if peek_pos >= len(self.tokens):
-            return self.tokens[-1]  # Return EOF
+            return self.tokens[-1]
         return self.tokens[peek_pos]
-    
+
     def advance(self) -> Token:
         """Advance to the next token and return the current one."""
         token = self.current_token()
         self.pos += 1
         return token
-    
+
     def expect(self, token_type: TokenType, message: str = None) -> Token:
         """Expect a specific token type and advance."""
         token = self.current_token()
@@ -164,34 +245,31 @@ class Parser:
             msg = message or f"Expected {token_type.name}, got {token.type.name}"
             raise ParseError(msg, token)
         return self.advance()
-    
+
     def skip_newlines(self):
         """Skip newline tokens."""
         while self.current_token().type == TokenType.NEWLINE:
             self.advance()
-    
+
     def parse(self) -> ProgramNode:
         """Parse the token stream into an AST."""
         statements = []
-        
+
         while self.current_token().type != TokenType.EOF:
             self.skip_newlines()
-            
             if self.current_token().type == TokenType.EOF:
                 break
-            
             stmt = self.parse_statement()
             if stmt is not None:
                 statements.append(stmt)
-            
             self.skip_newlines()
-        
+
         return ProgramNode(statements)
-    
+
     def parse_statement(self) -> Any:
         """Parse a single statement."""
         token = self.current_token()
-        
+
         if token.type == TokenType.LET:
             return self.parse_let()
         elif token.type == TokenType.PRINT:
@@ -205,192 +283,270 @@ class Parser:
         elif token.type == TokenType.REPEAT:
             return self.parse_repeat()
         elif token.type == TokenType.FUNCTION:
-            return self.parse_function()
+            return self.parse_function_def()
+        elif token.type == TokenType.RETURN:
+            return self.parse_return()
+        elif token.type == TokenType.BREAK:
+            self.advance()
+            return BreakNode()
+        elif token.type == TokenType.CONTINUE:
+            self.advance()
+            return ContinueNode()
+        elif token.type == TokenType.INPUT:
+            return self.parse_input()
         elif token.type == TokenType.IDENTIFIER:
-            # Could be an assignment (identifier = expression) or function call
             return self.parse_assignment_or_call()
         else:
             raise ParseError(f"Unexpected token: {token.type.name}", token)
-    
+
+    # ------------------------------------------------------------------
+    # Statement parsers
+    # ------------------------------------------------------------------
+
     def parse_assignment_or_call(self):
         """Parse an assignment or function call statement."""
         name_token = self.current_token()
         name = name_token.value
         self.advance()
-        
-        # Check if this is a function call with arguments: name(args)
+
+        # Check for indexing assignment: name[expr] = value
+        if self.current_token().type == TokenType.LBRACKET:
+            self.advance()  # Skip [
+            index = self.parse_expression()
+            self.expect(TokenType.RBRACKET, "Expected ']' after index")
+            if self.current_token().type == TokenType.EQUALS:
+                self.advance()
+                self.skip_newlines()
+                value = self.parse_expression()
+                # Represent as a special LetNode with name "__setindex__"
+                return LetNode(f"__setindex__:{name}", IndexNode(IdentifierNode(name), index))
+            # Otherwise it's just an indexed expression used as a statement
+            raise ParseError("Indexed expression used as statement without assignment", name_token)
+
+        # Check for function call: name(args)
         if self.current_token() and self.current_token().type == TokenType.LPAREN:
-            # This is a function call - but we need to handle it as an expression
-            # For now, just skip this pattern (it should be handled in expressions)
-            raise ParseError(f"Function calls should be part of an expression", name_token)
-        
+            args = self._parse_function_args()
+            call_node = FunctionCallNode(name, args)
+            return PrintNode(call_node)
+
         # Check for assignment: name = expression
         if self.current_token() and self.current_token().type == TokenType.EQUALS:
-            self.advance()  # Skip '='
+            self.advance()
             self.skip_newlines()
             value = self.parse_expression()
             return LetNode(name, value)
-        
+
         raise ParseError(f"Unexpected identifier: {name}", name_token)
-    
+
     def parse_let(self) -> LetNode:
-        """Parse a let statement: let <name> = <expression>"""
+        """Parse: let <name> = <expression>"""
         self.advance()  # Skip 'let'
-        
         name_token = self.expect(TokenType.IDENTIFIER, "Expected variable name after 'let'")
         name = name_token.value
-        
         self.skip_newlines()
         self.expect(TokenType.EQUALS, "Expected '=' after variable name")
-        
         self.skip_newlines()
         value = self.parse_expression()
-        
         return LetNode(name, value)
-    
+
     def parse_print(self) -> PrintNode:
-        """Parse a print statement: print <expression>"""
-        self.advance()  # Skip 'print'
-        
+        """Parse: print <expression>"""
+        self.advance()
         self.skip_newlines()
         value = self.parse_expression()
-        
         return PrintNode(value)
-    
+
+    def parse_input(self) -> LetNode:
+        """Parse: input("prompt") -> stores result in a variable or uses directly."""
+        self.advance()  # Skip 'input'
+        # This is handled as a built-in function call in expressions
+        # But if used as a statement like: input("Name: ")
+        # we parse it as a function call
+        if self.current_token().type == TokenType.LPAREN:
+            args = self._parse_function_args()
+            return PrintNode(FunctionCallNode('input', args))
+        raise ParseError("input() requires parentheses with a prompt string")
+
     def parse_if(self) -> IfNode:
-        """Parse an if statement: if <condition> then ... else ... end"""
+        """Parse: if <condition> then ... elif <condition> then ... else ... end"""
         self.advance()  # Skip 'if'
-        
         self.skip_newlines()
         condition = self.parse_expression()
-        
         self.skip_newlines()
         self.expect(TokenType.THEN, "Expected 'then' after condition")
-        
         self.skip_newlines()
         then_block = self.parse_block()
-        
         self.skip_newlines()
+
+        elif_chains = []
         else_block = None
-        
+
+        # Handle elif chains
+        while self.current_token().type == TokenType.ELIF:
+            self.advance()  # Skip 'elif'
+            self.skip_newlines()
+            elif_condition = self.parse_expression()
+            self.skip_newlines()
+            self.expect(TokenType.THEN, "Expected 'then' after elif condition")
+            self.skip_newlines()
+            elif_block = self.parse_block()
+            self.skip_newlines()
+            elif_chains.append((elif_condition, elif_block))
+
+        # Handle else
         if self.current_token().type == TokenType.ELSE:
-            self.advance()  # Skip 'else'
+            self.advance()
             self.skip_newlines()
             else_block = self.parse_block()
             self.skip_newlines()
-        
+
         self.expect(TokenType.END, "Expected 'end' to close if statement")
-        
-        return IfNode(condition, then_block, else_block)
-    
+        return IfNode(condition, then_block, else_block, elif_chains)
+
     def parse_while(self) -> WhileNode:
-        """Parse a while loop: while <condition> do ... end"""
-        self.advance()  # Skip 'while'
-        
+        """Parse: while <condition> do ... end"""
+        self.advance()
         self.skip_newlines()
         condition = self.parse_expression()
-        
         self.skip_newlines()
         self.expect(TokenType.DO, "Expected 'do' after while condition")
-        
         self.skip_newlines()
         body = self.parse_block()
-        
         self.skip_newlines()
         self.expect(TokenType.END, "Expected 'end' to close while loop")
-        
         return WhileNode(condition, body)
-    
+
     def parse_for(self) -> ForNode:
-        """Parse a for loop: for <var> in <iterable> do ... end"""
-        self.advance()  # Skip 'for'
-        
+        """Parse: for <var> in <iterable> do ... end"""
+        self.advance()
         self.skip_newlines()
         var_token = self.expect(TokenType.IDENTIFIER, "Expected variable name after 'for'")
-        
         self.skip_newlines()
         self.expect(TokenType.IN, "Expected 'in' after for variable")
-        
         self.skip_newlines()
         iterable = self.parse_expression()
-        
         self.skip_newlines()
         self.expect(TokenType.DO, "Expected 'do' after for iterable")
-        
         self.skip_newlines()
         body = self.parse_block()
-        
         self.skip_newlines()
         self.expect(TokenType.END, "Expected 'end' to close for loop")
-        
         return ForNode(var_token.value, iterable, body)
-    
-    def parse_repeat(self) -> RepeatNode:
-        """Parse a repeat loop: repeat <number> times ... end"""
-        self.advance()  # Skip 'repeat'
 
+    def parse_repeat(self) -> RepeatNode:
+        """Parse: repeat <number> times ... end"""
+        self.advance()
         self.skip_newlines()
         count = self.parse_expression()
-
         self.skip_newlines()
         self.expect(TokenType.TIMES, "Expected 'times' after repeat count")
+        self.skip_newlines()
+        body = self.parse_block()
+        self.skip_newlines()
+        self.expect(TokenType.END, "Expected 'end' to close repeat loop")
+        return RepeatNode(count, body)
+
+    def parse_function_def(self) -> FunctionDefNode:
+        """Parse: function <name>(<params>) ... end"""
+        self.advance()  # Skip 'function'
+        self.skip_newlines()
+        name_token = self.expect(TokenType.IDENTIFIER, "Expected function name")
+        name = name_token.value
+
+        # Parse parameters
+        params = []
+        if self.current_token().type == TokenType.LPAREN:
+            self.advance()  # Skip (
+            self.skip_newlines()
+            if self.current_token().type != TokenType.RPAREN:
+                param_token = self.expect(TokenType.IDENTIFIER, "Expected parameter name")
+                params.append(param_token.value)
+                while self.current_token().type == TokenType.COMMA:
+                    self.advance()
+                    self.skip_newlines()
+                    param_token = self.expect(TokenType.IDENTIFIER, "Expected parameter name")
+                    params.append(param_token.value)
+            self.expect(TokenType.RPAREN, "Expected ')' after parameters")
+
+        self.skip_newlines()
+        # Block keyword (then or just body)
+        if self.current_token().type == TokenType.THEN:
+            self.advance()
 
         self.skip_newlines()
         body = self.parse_block()
-
         self.skip_newlines()
-        self.expect(TokenType.END, "Expected 'end' to close repeat loop")
+        self.expect(TokenType.END, "Expected 'end' to close function definition")
 
-        return RepeatNode(count, body)
+        return FunctionDefNode(name, params, body)
+
+    def parse_return(self) -> ReturnNode:
+        """Parse: return <expression>"""
+        self.advance()  # Skip 'return'
+        self.skip_newlines()
+        # Return may or may not have a value
+        if self.current_token().type in (TokenType.NEWLINE, TokenType.END, TokenType.EOF):
+            return ReturnNode(None)
+        value = self.parse_expression()
+        return ReturnNode(value)
 
     def parse_block(self) -> List[Any]:
-        """Parse a block of statements until 'end', 'else', or EOF."""
+        """Parse a block of statements until 'end', 'else', 'elif', or EOF."""
         statements = []
-        
         while self.current_token().type not in (
-            TokenType.END, TokenType.ELSE, TokenType.EOF
+            TokenType.END, TokenType.ELSE, TokenType.ELIF, TokenType.EOF
         ):
             self.skip_newlines()
-            
-            if self.current_token().type in (TokenType.END, TokenType.ELSE, TokenType.EOF):
+            if self.current_token().type in (TokenType.END, TokenType.ELSE, TokenType.ELIF, TokenType.EOF):
                 break
-            
             stmt = self.parse_statement()
             if stmt is not None:
                 statements.append(stmt)
-        
         return statements
-    
+
+    def _parse_function_args(self) -> List[Any]:
+        """Parse function call arguments: (arg1, arg2, ...)"""
+        self.expect(TokenType.LPAREN, "Expected '(' to start function arguments")
+        args = []
+        self.skip_newlines()
+        if self.current_token().type == TokenType.RPAREN:
+            self.advance()
+            return args
+        args.append(self.parse_expression())
+        self.skip_newlines()
+        while self.current_token().type == TokenType.COMMA:
+            self.advance()
+            self.skip_newlines()
+            args.append(self.parse_expression())
+            self.skip_newlines()
+        self.expect(TokenType.RPAREN, "Expected ')' after function arguments")
+        return args
+
+    # ------------------------------------------------------------------
+    # Expression parsers (operator precedence)
+    # ------------------------------------------------------------------
+
     def parse_expression(self) -> Any:
-        """Parse an expression (handles operator precedence)."""
         return self.parse_or()
-    
+
     def parse_or(self) -> Any:
-        """Parse OR expressions."""
         left = self.parse_and()
-        
         while self.current_token().type == TokenType.OR:
-            op_token = self.advance()
+            self.advance()
             right = self.parse_and()
             left = BinaryOpNode(left, 'or', right)
-        
         return left
-    
+
     def parse_and(self) -> Any:
-        """Parse AND expressions."""
         left = self.parse_comparison()
-        
         while self.current_token().type == TokenType.AND:
-            op_token = self.advance()
+            self.advance()
             right = self.parse_comparison()
             left = BinaryOpNode(left, 'and', right)
-        
         return left
-    
+
     def parse_comparison(self) -> Any:
-        """Parse comparison expressions."""
         left = self.parse_additive()
-        
         comparison_ops = {
             TokenType.EQUALS_EQUALS: '==',
             TokenType.NOT_EQUALS: '!=',
@@ -399,111 +555,175 @@ class Parser:
             TokenType.LESS_EQUALS: '<=',
             TokenType.GREATER_EQUALS: '>=',
         }
-        
         while self.current_token().type in comparison_ops:
             op_token = self.advance()
             op = comparison_ops[op_token.type]
             right = self.parse_additive()
             left = BinaryOpNode(left, op, right)
-        
         return left
-    
+
     def parse_additive(self) -> Any:
-        """Parse additive expressions (+, -)."""
         left = self.parse_multiplicative()
-        
         while self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
             op = '+' if op_token.type == TokenType.PLUS else '-'
             right = self.parse_multiplicative()
             left = BinaryOpNode(left, op, right)
-        
         return left
-    
+
     def parse_multiplicative(self) -> Any:
-        """Parse multiplicative expressions (*, /)."""
         left = self.parse_unary()
-        
-        while self.current_token().type in (TokenType.STAR, TokenType.SLASH):
+        while self.current_token().type in (TokenType.STAR, TokenType.SLASH, TokenType.PERCENT):
             op_token = self.advance()
-            op = '*' if op_token.type == TokenType.STAR else '/'
+            op_map = {TokenType.STAR: '*', TokenType.SLASH: '/', TokenType.PERCENT: '%'}
+            op = op_map[op_token.type]
             right = self.parse_unary()
             left = BinaryOpNode(left, op, right)
-        
         return left
-    
+
     def parse_unary(self) -> Any:
-        """Parse unary expressions (not, -)."""
         if self.current_token().type == TokenType.NOT:
-            op_token = self.advance()
+            self.advance()
             operand = self.parse_unary()
             return UnaryOpNode('not', operand)
-        
         if self.current_token().type == TokenType.MINUS:
-            op_token = self.advance()
+            self.advance()
             operand = self.parse_unary()
             return UnaryOpNode('-', operand)
-        
-        return self.parse_primary()
-    
+        return self.parse_postfix()
+
+    def parse_postfix(self) -> Any:
+        """Parse postfix operations: indexing [i] and function calls (args)."""
+        expr = self.parse_primary()
+
+        while True:
+            if self.current_token().type == TokenType.LBRACKET:
+                self.advance()  # Skip [
+                index = self.parse_expression()
+                self.expect(TokenType.RBRACKET, "Expected ']' after index")
+                expr = IndexNode(expr, index)
+            elif self.current_token().type == TokenType.LPAREN and isinstance(expr, IdentifierNode):
+                # Function call on an identifier
+                args = self._parse_function_args()
+                expr = FunctionCallNode(expr.name, args)
+            elif self.current_token().type == TokenType.DOT:
+                # Dot access: obj.method(args) -> function call
+                self.advance()  # Skip .
+                method_token = self.expect(TokenType.IDENTIFIER, "Expected method name after '.'")
+                if self.current_token().type == TokenType.LPAREN:
+                    args = self._parse_function_args()
+                    # Convert to a method call: __method__(obj, args...)
+                    expr = FunctionCallNode(f"__method__:{method_token.value}", [expr] + args)
+                else:
+                    # Property access -> treat as index
+                    expr = IndexNode(expr, StringNode(method_token.value))
+            else:
+                break
+
+        return expr
+
     def parse_primary(self) -> Any:
-        """Parse primary expressions (numbers, strings, identifiers, parenthesized expressions)."""
+        """Parse primary expressions."""
         token = self.current_token()
-        
+
         if token.type == TokenType.NUMBER:
             self.advance()
-            # Convert to float or int
             value = float(token.value)
             if value == int(value):
                 value = int(value)
             return NumberNode(value)
-        
+
         if token.type == TokenType.STRING:
             self.advance()
             return StringNode(token.value)
-        
+
+        if token.type == TokenType.LBRACKET:
+            return self.parse_list_literal()
+
         if token.type == TokenType.IDENTIFIER:
             self.advance()
             return IdentifierNode(token.value)
-        
+
         if token.type == TokenType.LPAREN:
-            self.advance()  # Skip '('
+            self.advance()
             expr = self.parse_expression()
             self.expect(TokenType.RPAREN, "Expected ')' after expression")
             return expr
-        
-        if token.type == TokenType.TRUE:
+
+        if token.type in (TokenType.INPUT,):
+            # input() as expression
             self.advance()
-            return NumberNode(1)
-        
-        if token.type == TokenType.FALSE:
-            self.advance()
-            return NumberNode(0)
-        
+            if self.current_token().type == TokenType.LPAREN:
+                args = self._parse_function_args()
+                return FunctionCallNode('input', args)
+            return FunctionCallNode('input', [])
+
+        if token.type == TokenType.FUNCTION:
+            # Anonymous function as expression
+            return self.parse_function_def()
+
         raise ParseError(f"Unexpected token: {token.type.name}", token)
 
+    def parse_list_literal(self) -> ListNode:
+        """Parse a list literal: [1, 2, 3]"""
+        self.advance()  # Skip [
+        elements = []
+        self.skip_newlines()
+
+        if self.current_token().type == TokenType.RBRACKET:
+            self.advance()
+            return ListNode(elements)
+
+        elements.append(self.parse_expression())
+        self.skip_newlines()
+
+        while self.current_token().type == TokenType.COMMA:
+            self.advance()
+            self.skip_newlines()
+            elements.append(self.parse_expression())
+            self.skip_newlines()
+
+        self.expect(TokenType.RBRACKET, "Expected ']' after list elements")
+        return ListNode(elements)
+
+
+# ======================================================================
+# Interpreter
+# ======================================================================
 
 class Interpreter:
     """
     Interpreter for SimPL AST.
-    
-    Executes the AST and manages the program state (variables, etc.).
+
+    Executes the AST and manages the program state (variables, functions).
+    Includes built-in functions and the NPM Bridge via js_eval.
     """
-    
+
+    # Signal exceptions for control flow
+    _BreakSignal = BreakSignal
+    _ContinueSignal = ContinueSignal
+    _ReturnSignal = ReturnSignal
+
     def __init__(self):
         self.variables: Dict[str, Any] = {}
         self.output: List[str] = []
-    
+        self._functions: Dict[str, FunctionDefNode] = {}
+
     def interpret(self, ast: ProgramNode) -> List[str]:
         """Execute the AST and return the output."""
         self.variables = {}
         self.output = []
-        
+        self._functions = {}
+
         for stmt in ast.statements:
             self.execute(stmt)
-        
+
         return self.output
-    
+
+    # ------------------------------------------------------------------
+    # Statement execution
+    # ------------------------------------------------------------------
+
     def execute(self, node: Any):
         """Execute a single AST node."""
         if isinstance(node, LetNode):
@@ -518,14 +738,32 @@ class Interpreter:
             self.execute_for(node)
         elif isinstance(node, RepeatNode):
             self.execute_repeat(node)
+        elif isinstance(node, FunctionDefNode):
+            self._functions[node.name] = node
+        elif isinstance(node, ReturnNode):
+            value = self.evaluate(node.value) if node.value else None
+            raise ReturnSignal(value)
+        elif isinstance(node, BreakNode):
+            raise BreakSignal()
+        elif isinstance(node, ContinueNode):
+            raise ContinueSignal()
         else:
             raise RuntimeError(f"Unknown statement type: {type(node).__name__}")
-    
+
     def execute_let(self, node: LetNode):
         """Execute a let statement."""
+        # Check for special __setindex__ pattern
+        if node.name.startswith("__setindex__:"):
+            var_name = node.name.split(":", 1)[1]
+            if var_name not in self.variables:
+                raise RuntimeError(f"Undefined variable: {var_name}")
+            # The value is the IndexNode, we need to get the index
+            # and the actual value to set
+            # This is a simplified version: we reconstruct from the AST
+            raise RuntimeError("Index assignment not yet fully supported - use list functions")
         value = self.evaluate(node.value)
         self.variables[node.name] = value
-    
+
     def execute_print(self, node: PrintNode):
         """Execute a print statement."""
         value = self.evaluate(node.value)
@@ -534,85 +772,140 @@ class Interpreter:
         elif isinstance(value, bool):
             self.output.append('true' if value else 'false')
         elif value is None:
-            self.output.append('')
+            self.output.append('null')
+        elif isinstance(value, list):
+            self.output.append(self._format_list(value))
+        elif isinstance(value, dict):
+            import json
+            self.output.append(json.dumps(value))
         else:
             self.output.append(str(value))
-    
+
+    def _format_list(self, lst: list) -> str:
+        """Format a list for printing."""
+        items = []
+        for item in lst:
+            if isinstance(item, str):
+                items.append(item)
+            elif isinstance(item, bool):
+                items.append('true' if item else 'false')
+            elif isinstance(item, list):
+                items.append(self._format_list(item))
+            else:
+                items.append(str(item))
+        return '[' + ', '.join(items) + ']'
+
     def execute_if(self, node: IfNode):
-        """Execute an if statement."""
-        condition = self.evaluate(node.condition)
-        
-        if condition:
+        """Execute an if/elif/else statement."""
+        if self.evaluate(node.condition):
             for stmt in node.then_block:
                 self.execute(stmt)
-        elif node.else_block:
+            return
+
+        # Try elif chains
+        if node.elif_chains:
+            for elif_cond, elif_block in node.elif_chains:
+                if self.evaluate(elif_cond):
+                    for stmt in elif_block:
+                        self.execute(stmt)
+                    return
+
+        # Try else
+        if node.else_block:
             for stmt in node.else_block:
                 self.execute(stmt)
-    
+
     def execute_while(self, node: WhileNode):
-        """Execute a while loop."""
+        """Execute a while loop with break/continue support."""
         while self.evaluate(node.condition):
-            for stmt in node.body:
-                self.execute(stmt)
-    
+            try:
+                for stmt in node.body:
+                    self.execute(stmt)
+            except BreakSignal:
+                break
+            except ContinueSignal:
+                continue
+
     def execute_for(self, node: ForNode):
-        """Execute a for loop."""
+        """Execute a for loop with break/continue."""
         iterable = self.evaluate(node.iterable)
-        
-        # Handle range-like iteration (for i in 1 to 10)
+
         if isinstance(iterable, (int, float)):
-            # Simple case: for i in 5 means iterate 0 to 4
-            for i in range(int(iterable)):
-                self.variables[node.variable] = i
-                for stmt in node.body:
-                    self.execute(stmt)
+            items = list(range(int(iterable)))
         elif isinstance(iterable, (list, tuple)):
-            for item in iterable:
-                self.variables[node.variable] = item
-                for stmt in node.body:
-                    self.execute(stmt)
+            items = iterable
+        elif isinstance(iterable, str):
+            items = list(iterable)
         else:
             raise RuntimeError(f"Cannot iterate over {type(iterable).__name__}")
-    
+
+        for item in items:
+            self.variables[node.variable] = item
+            try:
+                for stmt in node.body:
+                    self.execute(stmt)
+            except BreakSignal:
+                break
+            except ContinueSignal:
+                continue
+
+    # ------------------------------------------------------------------
+    # Expression evaluation
+    # ------------------------------------------------------------------
+
     def evaluate(self, node: Any) -> Any:
         """Evaluate an expression node and return its value."""
         if isinstance(node, NumberNode):
             return node.value
-        
+
         if isinstance(node, StringNode):
             return node.value
-        
+
+        if isinstance(node, ListNode):
+            return [self.evaluate(el) for el in node.elements]
+
         if isinstance(node, IdentifierNode):
+            if node.name in self._functions:
+                return node.name  # Return function name as callable reference
             if node.name not in self.variables:
                 raise RuntimeError(f"Undefined variable: {node.name}")
             return self.variables[node.name]
-        
+
+        if isinstance(node, IndexNode):
+            obj = self.evaluate(node.obj)
+            index = self.evaluate(node.index)
+            try:
+                if isinstance(obj, dict):
+                    return obj.get(index, obj.get(str(index)))
+                return obj[index]
+            except (IndexError, KeyError, TypeError):
+                raise RuntimeError(f"Index error: cannot access [{index}]")
+
         if isinstance(node, BinaryOpNode):
             return self.evaluate_binary_op(node)
-        
+
         if isinstance(node, UnaryOpNode):
             return self.evaluate_unary_op(node)
-        
+
+        if isinstance(node, FunctionCallNode):
+            return self.evaluate_function_call(node)
+
         raise RuntimeError(f"Unknown expression type: {type(node).__name__}")
-    
+
     def evaluate_binary_op(self, node: BinaryOpNode) -> Any:
         """Evaluate a binary operation."""
         left = self.evaluate(node.left)
-        
-        # Short-circuit evaluation for logical operators
+
         if node.operator == 'and':
-            if not left:
-                return False
-            return bool(self.evaluate(node.right))
-        
+            return bool(left and self.evaluate(node.right))
         if node.operator == 'or':
-            if left:
-                return True
-            return bool(self.evaluate(node.right))
-        
+            return bool(left or self.evaluate(node.right))
+
         right = self.evaluate(node.right)
-        
+
         if node.operator == '+':
+            if isinstance(left, str) or isinstance(right, str):
+                return str(left) + str(right)
             return left + right
         elif node.operator == '-':
             return left - right
@@ -622,10 +915,13 @@ class Interpreter:
             if right == 0:
                 raise RuntimeError("Division by zero")
             result = left / right
-            # Return int if result is whole number
             if isinstance(result, float) and result == int(result):
                 return int(result)
             return result
+        elif node.operator == '%':
+            if right == 0:
+                raise RuntimeError("Modulo by zero")
+            return left % right
         elif node.operator == '==':
             return left == right
         elif node.operator == '!=':
@@ -640,51 +936,342 @@ class Interpreter:
             return left >= right
         else:
             raise RuntimeError(f"Unknown operator: {node.operator}")
-    
+
     def evaluate_unary_op(self, node: UnaryOpNode) -> Any:
         """Evaluate a unary operation."""
         operand = self.evaluate(node.operand)
-        
         if node.operator == 'not':
             return not operand
         elif node.operator == '-':
             return -operand
-        else:
-            raise RuntimeError(f"Unknown unary operator: {node.operator}")
+        raise RuntimeError(f"Unknown unary operator: {node.operator}")
 
+    # ------------------------------------------------------------------
+    # Function evaluation
+    # ------------------------------------------------------------------
+
+    def evaluate_function_call(self, node: FunctionCallNode) -> Any:
+        """Evaluate a function call (built-in or user-defined)."""
+        func_name = node.name
+        args = [self.evaluate(arg) for arg in node.arguments]
+
+        # Built-in functions
+        builtin_map = {
+            'js_eval': self._builtin_js_eval,
+            'str': self._builtin_str,
+            'int': self._builtin_int,
+            'float': self._builtin_float,
+            'len': self._builtin_len,
+            'type': self._builtin_type,
+            'abs': self._builtin_abs,
+            'min': self._builtin_min,
+            'max': self._builtin_max,
+            'round': self._builtin_round,
+            'input': self._builtin_input,
+            'push': self._builtin_push,
+            'pop': self._builtin_pop,
+            'range': self._builtin_range,
+            'keys': self._builtin_keys,
+            'values': self._builtin_values,
+            'split': self._builtin_split,
+            'join': self._builtin_join,
+            'replace': self._builtin_replace,
+            'upper': self._builtin_upper,
+            'lower': self._builtin_lower,
+            'trim': self._builtin_trim,
+            'number': self._builtin_int,
+            'string': self._builtin_str,
+            'floor': self._builtin_floor,
+            'ceil': self._builtin_ceil,
+            'sqrt': self._builtin_sqrt,
+            'pow': self._builtin_pow,
+            'random': self._builtin_random,
+        }
+
+        # Method calls (__method__:name pattern)
+        if func_name.startswith("__method__:"):
+            method_name = func_name.split(":", 1)[1]
+            method_map = {
+                'upper': self._builtin_upper,
+                'lower': self._builtin_lower,
+                'trim': self._builtin_trim,
+                'split': self._builtin_split,
+                'replace': self._builtin_replace,
+                'push': self._builtin_push,
+                'pop': self._builtin_pop,
+                'join': self._builtin_join,
+                'keys': self._builtin_keys,
+                'values': self._builtin_values,
+            }
+            if method_name in method_map:
+                return method_map[method_name](args)
+            raise RuntimeError(f"Unknown method: {method_name}")
+
+        if func_name in builtin_map:
+            return builtin_map[func_name](args)
+
+        # User-defined functions
+        if func_name in self._functions:
+            func_def = self._functions[func_name]
+
+            # Validate argument count
+            if len(args) != len(func_def.parameters):
+                raise RuntimeError(
+                    f"Function '{func_name}' expects {len(func_def.parameters)} "
+                    f"arguments, got {len(args)}"
+                )
+
+            # --- Proper scoping: save/restore the entire variable + function state ---
+            # This is essential for recursion: each call gets its own scope.
+            saved_vars = self.variables.copy()
+            saved_funcs = dict(self._functions)
+
+            # Bind parameters in a fresh scope (inherit outer vars but params take priority)
+            for param, arg_val in zip(func_def.parameters, args):
+                self.variables[param] = arg_val
+
+            # Execute function body
+            result = None
+            try:
+                for stmt in func_def.body:
+                    self.execute(stmt)
+            except ReturnSignal as ret:
+                result = ret.value
+
+            # Restore the caller's scope
+            self.variables = saved_vars
+            self._functions = saved_funcs
+
+            return result
+
+        raise RuntimeError(f"Undefined function: {func_name}")
+
+    # ------------------------------------------------------------------
+    # Built-in functions
+    # ------------------------------------------------------------------
+
+    def _builtin_js_eval(self, args):
+        if len(args) != 1:
+            raise RuntimeError("js_eval() expects exactly 1 argument")
+        if not isinstance(args[0], str):
+            raise RuntimeError("js_eval() argument must be a string")
+        from .js_bridge import js_eval as _js_eval, JSBridgeError
+        try:
+            return _js_eval(args[0])
+        except JSBridgeError as e:
+            raise RuntimeError(e.message)
+        except FileNotFoundError:
+            raise RuntimeError(
+                "🛑 Error: NPM Bridge requires Node.js to be installed. "
+                "💡 Tip: Download it from nodejs.org to use JS libraries!"
+            )
+
+    def _builtin_str(self, args):
+        if len(args) != 1:
+            raise RuntimeError("str() expects exactly 1 argument")
+        v = args[0]
+        if isinstance(v, bool):
+            return 'true' if v else 'false'
+        if isinstance(v, list):
+            return self._format_list(v)
+        return str(v)
+
+    def _builtin_int(self, args):
+        if len(args) != 1:
+            raise RuntimeError("int() expects exactly 1 argument")
+        try:
+            return int(float(args[0])) if isinstance(args[0], str) else int(args[0])
+        except (ValueError, TypeError):
+            raise RuntimeError(f"Cannot convert to int: {args[0]!r}")
+
+    def _builtin_float(self, args):
+        if len(args) != 1:
+            raise RuntimeError("float() expects exactly 1 argument")
+        try:
+            return float(args[0])
+        except (ValueError, TypeError):
+            raise RuntimeError(f"Cannot convert to float: {args[0]!r}")
+
+    def _builtin_len(self, args):
+        if len(args) != 1:
+            raise RuntimeError("len() expects exactly 1 argument")
+        try:
+            return len(args[0])
+        except TypeError:
+            raise RuntimeError(f"Cannot get length of {type(args[0]).__name__}")
+
+    def _builtin_type(self, args):
+        if len(args) != 1:
+            raise RuntimeError("type() expects exactly 1 argument")
+        v = args[0]
+        if isinstance(v, bool): return 'boolean'
+        if isinstance(v, int): return 'number'
+        if isinstance(v, float): return 'number'
+        if isinstance(v, str): return 'string'
+        if isinstance(v, list): return 'list'
+        if isinstance(v, dict): return 'object'
+        if v is None: return 'null'
+        return type(v).__name__
+
+    def _builtin_abs(self, args):
+        if len(args) != 1: raise RuntimeError("abs() expects 1 argument")
+        return abs(args[0])
+
+    def _builtin_min(self, args):
+        if len(args) < 1: raise RuntimeError("min() expects at least 1 argument")
+        if len(args) == 1 and isinstance(args[0], list):
+            return min(args[0])
+        return min(args)
+
+    def _builtin_max(self, args):
+        if len(args) < 1: raise RuntimeError("max() expects at least 1 argument")
+        if len(args) == 1 and isinstance(args[0], list):
+            return max(args[0])
+        return max(args)
+
+    def _builtin_round(self, args):
+        if len(args) < 1 or len(args) > 2:
+            raise RuntimeError("round() expects 1 or 2 arguments")
+        if len(args) == 2:
+            return round(args[0], int(args[1]))
+        return round(args[0])
+
+    def _builtin_input(self, args):
+        """Read input from the user."""
+        prompt = ""
+        if len(args) >= 1:
+            prompt = str(args[0])
+        try:
+            return input(prompt)
+        except EOFError:
+            return ""
+
+    def _builtin_push(self, args):
+        """push(list, value) - add value to end of list."""
+        if len(args) != 2:
+            raise RuntimeError("push() expects 2 arguments: push(list, value)")
+        lst, val = args
+        if not isinstance(lst, list):
+            raise RuntimeError("push() first argument must be a list")
+        lst.append(val)
+        return lst
+
+    def _builtin_pop(self, args):
+        """pop(list) - remove and return last element."""
+        if len(args) != 1:
+            raise RuntimeError("pop() expects 1 argument")
+        if not isinstance(args[0], list):
+            raise RuntimeError("pop() argument must be a list")
+        if not args[0]:
+            raise RuntimeError("pop() on empty list")
+        return args[0].pop()
+
+    def _builtin_range(self, args):
+        """range(n) or range(start, end) or range(start, end, step)."""
+        if len(args) == 1:
+            return list(range(int(args[0])))
+        elif len(args) == 2:
+            return list(range(int(args[0]), int(args[1])))
+        elif len(args) == 3:
+            return list(range(int(args[0]), int(args[1]), int(args[2])))
+        raise RuntimeError("range() expects 1-3 arguments")
+
+    def _builtin_keys(self, args):
+        if len(args) != 1: raise RuntimeError("keys() expects 1 argument")
+        if isinstance(args[0], dict):
+            return list(args[0].keys())
+        raise RuntimeError("keys() argument must be an object")
+
+    def _builtin_values(self, args):
+        if len(args) != 1: raise RuntimeError("values() expects 1 argument")
+        if isinstance(args[0], dict):
+            return list(args[0].values())
+        raise RuntimeError("values() argument must be an object")
+
+    def _builtin_split(self, args):
+        if len(args) == 1:
+            return args[0].split()
+        elif len(args) == 2:
+            return args[0].split(args[1])
+        raise RuntimeError("split() expects 1-2 arguments")
+
+    def _builtin_join(self, args):
+        if len(args) == 2:
+            return args[0].join([str(x) for x in args[1]])
+        raise RuntimeError("join() expects 2 arguments: join(separator, list)")
+
+    def _builtin_replace(self, args):
+        if len(args) == 3:
+            return args[0].replace(args[1], args[2])
+        raise RuntimeError("replace() expects 3 arguments: replace(string, old, new)")
+
+    def _builtin_upper(self, args):
+        if len(args) != 1: raise RuntimeError("upper() expects 1 argument")
+        return str(args[0]).upper()
+
+    def _builtin_lower(self, args):
+        if len(args) != 1: raise RuntimeError("lower() expects 1 argument")
+        return str(args[0]).lower()
+
+    def _builtin_trim(self, args):
+        if len(args) != 1: raise RuntimeError("trim() expects 1 argument")
+        return str(args[0]).strip()
+
+    def _builtin_floor(self, args):
+        if len(args) != 1: raise RuntimeError("floor() expects 1 argument")
+        import math
+        return int(math.floor(float(args[0])))
+
+    def _builtin_ceil(self, args):
+        if len(args) != 1: raise RuntimeError("ceil() expects 1 argument")
+        import math
+        return int(math.ceil(float(args[0])))
+
+    def _builtin_sqrt(self, args):
+        if len(args) != 1: raise RuntimeError("sqrt() expects 1 argument")
+        import math
+        return math.sqrt(float(args[0]))
+
+    def _builtin_pow(self, args):
+        if len(args) != 2: raise RuntimeError("pow() expects 2 arguments")
+        return args[0] ** args[1]
+
+    def _builtin_random(self, args):
+        """random() or random(max) or random(min, max)."""
+        import random as _random
+        if len(args) == 0:
+            return _random.random()
+        elif len(args) == 1:
+            return _random.randint(0, int(args[0]) - 1)
+        elif len(args) == 2:
+            return _random.randint(int(args[0]), int(args[1]))
+        raise RuntimeError("random() expects 0-2 arguments")
+
+
+# ======================================================================
+# Convenience
+# ======================================================================
 
 def parse_and_execute(source: str) -> List[str]:
     """
     Convenience function to parse and execute SimPL source code.
-    
-    Args:
-        source: The SimPL source code string.
-    
-    Returns:
-        List of output strings from print statements.
     """
     lexer = Lexer(source)
     tokens = lexer.tokenize()
-    
     parser = Parser(tokens)
     ast = parser.parse()
-    
     interpreter = Interpreter()
     return interpreter.interpret(ast)
 
 
 if __name__ == '__main__':
-    # Test the parser and interpreter
     test_code = '''
 let x = 10
 let y = 20
 print "Hello, World!"
 print x + y
-print x * y
 '''
-    
     output = parse_and_execute(test_code)
-    
     print("Output:")
     for line in output:
         print(f"  {line}")

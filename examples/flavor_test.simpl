@@ -1,0 +1,55 @@
+# ============================================================
+# SimPL Syntax Flavor Pack Test
+# This single file demonstrates ALL three syntax flavors.
+# Run: python simpl.py run examples/flavor_test.simpl
+# ============================================================
+
+# --- STANDARD SimPL ---
+let x = 10
+if x > 5 then
+    print "Standard SimPL works!"
+end
+
+# --- C/JS STYLE ---
+let y = 20;
+if (y > 15) {
+    print "C/JS style works!";
+}
+
+# --- PYTHON STYLE ---
+let z = 30
+if z > 25:
+    print "Python style works!"
+
+# --- C-STYLE WHILE LOOP ---
+let i = 0
+while (i < 3) {
+    print "C-loop: " + str(i);
+    let i = i + 1;
+}
+
+# --- PYTHON-STYLE FOR LOOP (using indentation) ---
+let nums = [10, 20, 30]
+for n in nums:
+    print "Python-for: " + str(n)
+
+# --- MIXED STYLES IN SAME PROGRAM (different blocks) ---
+let score = 85
+if score >= 90 then
+    print "Grade: A"
+elif score >= 80 then
+    print "Grade: B"
+elif score >= 70 then
+    print "Grade: C"
+else
+    print "Grade: F"
+end
+
+# --- C-STYLE WITH SEMICOLONS ---
+let a = 5; let b = 10;
+if (a + b == 15) {
+    print "Semicolons and C-style together!";
+}
+
+print ""
+print "All flavor tests passed!"

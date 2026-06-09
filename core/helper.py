@@ -24,6 +24,7 @@ class ErrorCategory:
     DIVISION_ERROR = "Division Error"
     LOGIC_ERROR = "Logic Error"
     RUNTIME_ERROR = "Runtime Error"
+    FLAVOR_ERROR = "Flavor Mix Error"
     UNKNOWN = "Unknown Error"
 
 
@@ -94,10 +95,26 @@ class SmartHelper:
             r"unterminated string",
             r"mismatched quotes",
         ],
+        'mixed_flavors': [
+            r"Mixed syntax flavors",
+            r"mixed.*flavor",
+            r"started.*with.*C-style.*closed.*with.*end",
+            r"started.*with.*Python.*closed.*with.*}",
+        ],
     }
     
     # Helpful tips for each error category
     TIPS = {
+        'mixed_flavors': HelpfulTip(
+            "Mixed syntax flavors detected",
+            "You mixed C-style '{...}' with Standard 'end' or Python-style ':' with '}'. "
+            "SimPL supports all three flavors, but you must stick to one per block.",
+            "Pick ONE flavor per block and use it consistently.",
+            "# Standard:  if x > 5 then ... end\n"
+            "# C-style:   if (x > 5) { ... }\n"
+            "# Python:    if x > 5:\n"
+            "#               ..."
+        ),
         'missing_then': HelpfulTip(
             "Missing 'then' keyword",
             "In SimPL, every 'if' statement needs a 'then' keyword after the condition.",
@@ -218,6 +235,7 @@ class SmartHelper:
             'invalid_syntax': ErrorCategory.SYNTAX,
             'missing_parenthesis': ErrorCategory.SYNTAX,
             'string_quotes': ErrorCategory.SYNTAX,
+            'mixed_flavors': ErrorCategory.FLAVOR_ERROR,
         }
         return category_map.get(error_type, ErrorCategory.UNKNOWN)
     
@@ -315,9 +333,8 @@ class SmartHelper:
                     'tip': "Make sure every \" has a matching \"",
                 })
             
-            # Check for if without then
+            # Check for if without then (only if not using C/Python flavors)
             if stripped.startswith('if ') and ' then' not in stripped:
-                # Might be multi-line, but warn anyway
                 if '{' not in stripped and ':' not in stripped:
                     issues.append({
                         'line': i,
@@ -325,6 +342,16 @@ class SmartHelper:
                         'message': "'if' statements need 'then' keyword.",
                         'tip': "Add 'then' after the condition: if x > 5 then",
                     })
+
+            # Check for mixed flavors in the same block
+            # (C-style open + Standard close or vice versa)
+            if stripped.endswith('{') and 'end' in stripped:
+                issues.append({
+                    'line': i,
+                    'type': 'mixed_flavors',
+                    'message': "Mixed C-style '{' with Standard 'end' on same line.",
+                    'tip': "Stick to one flavor: either { } or then/end",
+                })
             
             # Check for let without =
             if stripped.startswith('let ') and '=' not in stripped:
@@ -349,17 +376,26 @@ class SmartHelper:
     def get_quick_reference(self) -> str:
         """Return a quick reference guide for common errors."""
         reference = """
-╔═══════════════════════════════════════════════════════╗
-║          SimPL Quick Reference - Common Errors        ║
-╚═══════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════╗
+║          SimPL Quick Reference - Common Errors & Flavors      ║
+╚═══════════════════════════════════════════════════════════════╝
 
 📝 VARIABLE DECLARATION
    ✓ Correct: let x = 10
    ✗ Wrong: x = 10 (missing 'let')
 
-📝 IF STATEMENTS  
+📝 IF STATEMENTS (Standard)
    ✓ Correct: if x > 5 then print x end
    ✗ Wrong: if x > 5 print x (missing 'then' and 'end')
+
+📝 IF STATEMENTS (C/JS Style)
+   ✓ Correct: if (x > 5) { print x }
+   ✗ Wrong: if (x > 5) { print x end  (mixed flavors!)
+
+📝 IF STATEMENTS (Python Style)
+   ✓ Correct: if x > 5:
+               print x
+   ✗ Wrong: if x > 5: print x }  (mixed flavors!)
 
 📝 STRINGS
    ✓ Correct: print "Hello, World!"
@@ -372,6 +408,13 @@ class SmartHelper:
 📝 DIVISION
    ✓ Safe: if divisor != 0 then result = a / b end
    ✗ Dangerous: result = a / 0 (division by zero!)
+
+📝 MIXED FLAVORS
+   ✗ WRONG: if x > 5 { print x end
+   💡 Stick to ONE flavor per block!
+      Standard: if x > 5 then ... end
+      C-style:  if (x > 5) { ... }
+      Python:   if x > 5: (indent)
 
 💡 Remember: When you see an error, read the friendly message
    first - it will tell you exactly what to fix!

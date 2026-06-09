@@ -1,0 +1,46 @@
+# SimPL NPM Bridge Test
+# This script demonstrates the NPM Bridge feature.
+# Before running, install an NPM package:
+#   python simpl.py install npm:moment
+#
+# Then run this script:
+#   python simpl.py run examples/test_npm.simpl
+
+# --- Test 1: Simple JS evaluation (no package needed) ---
+# js_eval can run any JavaScript expression even without an NPM package.
+
+let js_result = js_eval("1 + 2")
+print "Test 1 - Simple JS math:"
+print "1 + 2 = "
+print js_result
+
+# --- Test 2: String manipulation via JS ---
+let greeting = js_eval("'Hello' + ' ' + 'from JS!'")
+print ""
+print "Test 2 - JS string concat:"
+print greeting
+
+# --- Test 3: Using an NPM package via js_eval ---
+# If you installed npm:moment, this will work:
+#   current_year = js_eval("require('moment')().format('YYYY')")
+#   print "The year is: " + str(current_year)
+#
+# Example (uncomment after installing npm:moment):
+# import npm_moment
+# current_year = js_eval("require('moment')().format('YYYY')")
+# print "The year is: " + str(current_year)
+
+# --- Test 4: Using the str() built-in with js_eval ---
+let js_number = js_eval("42")
+print ""
+print "Test 4 - JS number to SimPL string:"
+print "The answer is: " + str(js_number)
+
+# --- Test 5: JSON object from JS ---
+let js_obj = js_eval("({name: 'SimPL', version: 1})")
+print ""
+print "Test 5 - JS object returned to SimPL:"
+print js_obj
+
+print ""
+print "NPM Bridge tests complete!"
