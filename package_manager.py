@@ -55,9 +55,17 @@ def _curl_get(url, timeout=15, headers=None):
     """
     cmd = ['curl', '-sS', '-w', '\n%{http_code}', '--max-time', str(timeout)]
 
+    # Always add a User-Agent header for GitHub API compatibility
+    default_headers = {
+        'User-Agent': 'SimPL-Package-Manager/0.6.0',
+        'Accept': 'application/vnd.github.v3+json',
+    }
+
     if headers:
-        for key, value in headers.items():
-            cmd.extend(['-H', f'{key}: {value}'])
+        default_headers.update(headers)
+
+    for key, value in default_headers.items():
+        cmd.extend(['-H', f'{key}: {value}'])
 
     cmd.append(url)
 

@@ -33,7 +33,7 @@ from core.helper import SmartHelper, handle_error, get_helper
 from package_manager import install_package, uninstall_package, list_installed_packages
 
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 
 def load_source_file(filepath: str) -> str:
@@ -288,6 +288,22 @@ def repl_mode():
             print(handle_error(e, line))
 
 
+def update_mode():
+    """Check for and apply SimPL updates."""
+    from core.tui import check_for_updates, get_update_instructions, _get_version
+    print(f"SimPL v{_get_version()} - Update Checker")
+    print()
+    print("Checking for updates...")
+    latest = check_for_updates()
+    current = _get_version()
+    if latest:
+        print(f"\nUpdate available! v{current} -> v{latest}")
+        print("\nTo update, run:")
+        print(get_update_instructions())
+    else:
+        print(f"\nYou are up to date! (v{current})")
+
+
 def tui_mode():
     """Launch the SimPL TUI (Terminal User Interface)."""
     from core.tui import run_tui
@@ -333,7 +349,7 @@ Syntax Flavors:
     parser.add_argument(
         'command',
         nargs='?',
-        choices=['run', 'install', 'uninstall', 'list'],
+        choices=['run', 'install', 'uninstall', 'list', 'update'],
         help='Command to execute'
     )
 
@@ -374,6 +390,12 @@ Syntax Flavors:
     )
 
     parser.add_argument(
+        '--update',
+        action='store_true',
+        help='Check for SimPL updates'
+    )
+
+    parser.add_argument(
         '--mock',
         action='store_true',
         help='Use mock data for package installation (for testing)'
@@ -407,6 +429,11 @@ Syntax Flavors:
     # TUI mode (explicit)
     if args.tui:
         tui_mode()
+        return 0
+
+    # Update check
+    if args.update:
+        update_mode()
         return 0
 
     # No command provided — launch TUI by default
@@ -463,6 +490,10 @@ Syntax Flavors:
         else:
             print("No packages installed yet.")
             print("Install a package with: simpl install <package-name>")
+        return 0
+
+    elif args.command == 'update':
+        update_mode()
         return 0
 
     return 0

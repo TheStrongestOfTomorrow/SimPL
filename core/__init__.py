@@ -8,6 +8,7 @@ from .lexer import Lexer, tokenize, Token, TokenType, FlavorNormalizer, MixedFla
 from .parser import (
     Parser, Interpreter, parse_and_execute,
     ParseError, RuntimeError as SimPLRuntimeError,
+    SimPLHttpResponse,
     # AST Node types
     NumberNode, BooleanNode, StringNode, ListNode, DictNode,
     IdentifierNode, IndexNode, BinaryOpNode, UnaryOpNode,

@@ -1,0 +1,78 @@
+# SimPL Real-World Demo
+# This script demonstrates that SimPL is useful TODAY for real tasks!
+# Requires: curl (for HTTP built-ins)
+
+print "=== SimPL Real-World Demo ==="
+print ""
+
+# ── 1. Fetch data from a real API ──────────────────────────────
+print "Fetching SimPL repo info from GitHub..."
+let response = get("https://api.github.com/repos/TheStrongestOfTomorrow/SimPL")
+let status_code = response["status"]
+print "HTTP Status: " + str(status_code)
+
+if status_code == 200 then
+    let data = response.json()
+    print "Repository: " + str(data["full_name"])
+    print "Stars: " + str(data["stargazers_count"])
+    print "Language: " + str(data["language"])
+    print "Open Issues: " + str(data["open_issues_count"])
+else
+    print "Could not fetch repo info (might be rate-limited by GitHub API)"
+end
+
+print ""
+
+# ── 2. JSON: Create and save a config file ─────────────────────
+let config = {"name": "SimPL", "version": "0.6.0", "author": "TheStrongestOfTomorrow", "license": "MIT"}
+
+let json_str = to_json(config, true)
+print "Generated JSON config:"
+print json_str
+
+# Save to file
+write_file("config.json", to_json(config, true))
+print ""
+print "Config saved to config.json!"
+
+# ── 3. Read it back ────────────────────────────────────────────
+print ""
+print "Reading config.json back..."
+let file_content = read_file("config.json")
+let loaded_config = parse_json(file_content)
+print "Name: " + str(loaded_config["name"])
+print "Version: " + str(loaded_config["version"])
+
+# ── 4. Dict operations ────────────────────────────────────────
+print ""
+print "Dict operations demo:"
+let person = {"name": "Alice", "age": 30, "city": "Wonderland"}
+print "Keys: " + str(keys(person))
+print "Values: " + str(values(person))
+print "Has 'age'? " + str(has_key(person, "age"))
+print "Has 'email'? " + str(has_key(person, "email"))
+remove(person, "city")
+print "After remove 'city': " + to_json(person)
+
+# ── 5. Math + List operations ─────────────────────────────────
+print ""
+print "Math + List operations:"
+let numbers = [5, 3, 8, 1, 9, 2, 7, 4, 6]
+print "Original: " + str(numbers)
+print "Sorted:   " + str(sort(numbers))
+print "Reversed: " + str(reverse(sort(numbers)))
+
+function reduce_sum(lst)
+    let total = 0
+    for n in lst do
+        total = total + n
+    end
+    return total
+end
+
+print "Sum:      " + str(reduce_sum(numbers))
+print "Min:      " + str(min(numbers))
+print "Max:      " + str(max(numbers))
+
+print ""
+print "=== Demo Complete! ==="

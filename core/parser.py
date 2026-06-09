@@ -24,6 +24,9 @@ Supports:
 - Input function
 - String concatenation with +
 - NPM Bridge via js_eval()
+- HTTP built-ins: get(), post() with response objects
+- JSON built-ins: parse_json(), to_json()
+- Enhanced dict methods: keys(), values(), has_key(), remove()
 - Many built-in functions for I/O, string, list, and system operations
 """
 
@@ -770,6 +773,40 @@ class Parser:
 
 
 # ======================================================================
+# HTTP Response Object
+# ======================================================================
+
+class SimPLHttpResponse(dict):
+    """HTTP Response object returned by get() and post().
+
+    Behaves like a dict so it can be accessed with [] notation:
+      response["body"]    -> response body as string
+      response["status"]  -> HTTP status code as number
+      response["headers"] -> response headers as dict
+
+    Also supports method-style calls:
+      response.json()     -> parse body as JSON
+    """
+
+    def __init__(self, body, status_code, headers):
+        super().__init__({
+            'body': body,
+            'status': status_code,
+            'headers': headers,
+        })
+        self._body = body
+        self._status = status_code
+        self._headers = headers
+
+    def __repr__(self):
+        return f'<SimPLHttpResponse status={self._status}>'
+
+    def __str__(self):
+        body_preview = self._body[:100] + '...' if len(self._body) > 100 else self._body
+        return f'<Response [{self._status}] body="{body_preview}">'
+
+
+# ======================================================================
 # Interpreter
 # ======================================================================
 
@@ -859,7 +896,9 @@ class Interpreter:
     def execute_print(self, node: PrintNode):
         """Execute a print statement."""
         value = self.evaluate(node.value)
-        if isinstance(value, str):
+        if isinstance(value, SimPLHttpResponse):
+            self.output.append(str(value))
+        elif isinstance(value, str):
             self.output.append(value)
         elif isinstance(value, bool):
             self.output.append('true' if value else 'false')
@@ -1137,6 +1176,17 @@ class Interpreter:
             'slice': self._builtin_slice,
             'index_of': self._builtin_index_of,
             'to_number': self._builtin_to_number,
+            # HTTP built-ins
+            'get': self._builtin_get,
+            'post': self._builtin_post,
+            # JSON built-ins
+            'parse_json': self._builtin_parse_json,
+            'to_json': self._builtin_to_json,
+            # Dict helpers
+            'has_key': self._builtin_has_key,
+            'remove': self._builtin_remove,
+            # HTTP response methods
+            'json': self._builtin_response_json,
         }
 
         # Method calls (__method__:name pattern)
@@ -1159,6 +1209,15 @@ class Interpreter:
                 'starts_with': self._builtin_starts_with,
                 'ends_with': self._builtin_ends_with,
                 'index_of': self._builtin_index_of,
+                # Dict methods
+                'keys': self._builtin_keys,
+                'values': self._builtin_values,
+                'has_key': self._builtin_has_key,
+                'remove': self._builtin_remove,
+                # HTTP response methods
+                'json': self._builtin_response_json,
+                'status': self._method_noop,
+                'headers': self._method_noop,
             }
             if method_name in method_map:
                 return method_map[method_name](args)
@@ -1566,6 +1625,167 @@ class Interpreter:
             return float(val)
         except (ValueError, TypeError):
             raise RuntimeError(f"Cannot convert to number: {val!r}")
+
+    # ------------------------------------------------------------------
+    # HTTP built-in functions
+    # ------------------------------------------------------------------
+
+    def _builtin_get(self, args):
+        """get(url) or get(url, headers_dict) - HTTP GET request.
+
+        Returns a SimPLHttpResponse dict with keys:
+          body    - response body as string
+          status  - HTTP status code (number)
+          headers - response headers as dict
+        """
+        if len(args) < 1 or len(args) > 2:
+            raise RuntimeError("get() expects 1-2 arguments: get(url, headers?)")
+        url = str(args[0])
+        headers = args[1] if len(args) == 2 and isinstance(args[1], dict) else {}
+        return self._http_request('GET', url, headers=headers)
+
+    def _builtin_post(self, args):
+        """post(url, data) or post(url, data, headers_dict) - HTTP POST request.
+
+        data can be a string or dict (auto-converts to JSON).
+        Returns a SimPLHttpResponse dict with keys:
+          body    - response body as string
+          status  - HTTP status code (number)
+          headers - response headers as dict
+        """
+        if len(args) < 2 or len(args) > 3:
+            raise RuntimeError("post() expects 2-3 arguments: post(url, data, headers?)")
+        url = str(args[0])
+        data = args[1]
+        headers = args[2] if len(args) == 3 and isinstance(args[2], dict) else {}
+        return self._http_request('POST', url, data=data, headers=headers)
+
+    def _http_request(self, method, url, data=None, headers=None, timeout=10):
+        """Internal: perform an HTTP request using curl via subprocess."""
+        import subprocess as _sp
+        import json as _json
+
+        cmd = ['curl', '-sS', '-w', '\n__SIMPL_HTTP_STATUS__%{http_code}', '--max-time', str(timeout)]
+
+        # Method
+        if method == 'POST':
+            cmd.extend(['-X', 'POST'])
+
+        # Headers
+        if headers:
+            for key, value in headers.items():
+                cmd.extend(['-H', f'{key}: {value}'])
+
+        # Data
+        if data is not None:
+            if isinstance(data, dict):
+                # Auto-convert dict to JSON
+                json_str = _json.dumps(data)
+                cmd.extend(['-H', 'Content-Type: application/json', '-d', json_str])
+            else:
+                cmd.extend(['-d', str(data)])
+
+        cmd.append(url)
+
+        try:
+            result = _sp.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        except FileNotFoundError:
+            raise RuntimeError("curl is not installed. Install curl to use HTTP functions.")
+        except _sp.TimeoutExpired:
+            raise RuntimeError(f"HTTP request to {url} timed out after {timeout}s")
+
+        output = result.stdout
+
+        # Parse status code from the special marker we injected
+        status_code = 0
+        body = output
+        marker = '__SIMPL_HTTP_STATUS__'
+        if marker in output:
+            parts = output.rsplit(marker, 1)
+            if len(parts) == 2:
+                body = parts[0]
+                try:
+                    status_code = int(parts[1].strip())
+                except ValueError:
+                    pass
+
+        # Parse headers from curl's -D / -i — we'll use a simpler approach
+        # We return headers as an empty dict since parsing curl raw headers is complex
+        response_headers = {}
+
+        # Build the response object as a special dict
+        response = SimPLHttpResponse(body, status_code, response_headers)
+        return response
+
+    def _builtin_response_json(self, args):
+        """response.json() - Parse the body of an HTTP response as JSON."""
+        if len(args) != 1:
+            raise RuntimeError("json() expects 1 argument: response.json()")
+        resp = args[0]
+        if not isinstance(resp, SimPLHttpResponse):
+            raise RuntimeError("json() can only be called on an HTTP response object")
+        import json as _json
+        try:
+            return _json.loads(resp['body'])
+        except _json.JSONDecodeError as e:
+            raise RuntimeError(f"Failed to parse JSON from response: {e}")
+
+    def _method_noop(self, args):
+        """Fallback for property-style accesses on response objects."""
+        # This shouldn't normally be called; properties are handled via IndexNode
+        return None
+
+    # ------------------------------------------------------------------
+    # JSON built-in functions
+    # ------------------------------------------------------------------
+
+    def _builtin_parse_json(self, args):
+        """parse_json(string) - Parse a JSON string into a SimPL dict/list."""
+        if len(args) != 1:
+            raise RuntimeError("parse_json() expects 1 argument")
+        import json as _json
+        try:
+            return _json.loads(str(args[0]))
+        except _json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON: {e}")
+
+    def _builtin_to_json(self, args):
+        """to_json(obj) or to_json(obj, pretty) - Convert SimPL object to JSON string."""
+        if len(args) < 1 or len(args) > 2:
+            raise RuntimeError("to_json() expects 1-2 arguments: to_json(obj, pretty?)")
+        import json as _json
+        pretty = False
+        if len(args) == 2:
+            pretty = bool(args[1])
+        try:
+            if pretty:
+                return _json.dumps(args[0], indent=2, default=str)
+            return _json.dumps(args[0], default=str)
+        except (TypeError, ValueError) as e:
+            raise RuntimeError(f"Cannot convert to JSON: {e}")
+
+    # ------------------------------------------------------------------
+    # Enhanced Dict built-in functions
+    # ------------------------------------------------------------------
+
+    def _builtin_has_key(self, args):
+        """has_key(dict, key) - Check if dict contains key."""
+        if len(args) != 2:
+            raise RuntimeError("has_key() expects 2 arguments: has_key(dict, key)")
+        if not isinstance(args[0], dict):
+            raise RuntimeError("has_key() first argument must be a dict")
+        return args[1] in args[0]
+
+    def _builtin_remove(self, args):
+        """remove(dict, key) - Remove a key from dict."""
+        if len(args) != 2:
+            raise RuntimeError("remove() expects 2 arguments: remove(dict, key)")
+        if not isinstance(args[0], dict):
+            raise RuntimeError("remove() first argument must be a dict")
+        key = args[1]
+        if key in args[0]:
+            del args[0][key]
+        return args[0]
 
 
 # ======================================================================
