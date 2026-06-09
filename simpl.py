@@ -30,10 +30,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.lexer import Lexer, tokenize, MixedFlavorError
 from core.parser import Parser, Interpreter, parse_and_execute, ParseError, RuntimeError as SimPLRuntimeError
 from core.helper import SmartHelper, handle_error, get_helper
-from package_manager import install_package, uninstall_package, list_installed_packages
+from package_manager import install_package, uninstall_package, list_installed_packages, list_available_packages, get_dependency_status
 
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 
 def load_source_file(filepath: str) -> str:
@@ -322,6 +322,8 @@ Commands:
   install npm:<package-name>      Install an NPM package (JS Bridge)
   uninstall <package-name>        Uninstall a package
   list                            List installed packages
+  available                       List available packages
+  deps                            Check dependency status
 
 Options:
   --check <script.simpl>          Check script for errors without running
@@ -349,7 +351,7 @@ Syntax Flavors:
     parser.add_argument(
         'command',
         nargs='?',
-        choices=['run', 'install', 'uninstall', 'list', 'update'],
+        choices=['run', 'install', 'uninstall', 'list', 'available', 'deps', 'update'],
         help='Command to execute'
     )
 
@@ -490,6 +492,26 @@ Syntax Flavors:
         else:
             print("No packages installed yet.")
             print("Install a package with: simpl install <package-name>")
+        return 0
+
+    elif args.command == 'available':
+        packages = list_available_packages()
+        if packages:
+            print("Available packages:")
+            for pkg in packages:
+                print(f"  - {pkg['name']}@{pkg['version']} - {pkg['description']}")
+        else:
+            print("No packages found in the registry.")
+        return 0
+
+    elif args.command == 'deps':
+        deps = get_dependency_status()
+        print("SimPL Dependency Status:")
+        for name, info in deps.items():
+            status = "OK" if info['available'] else "MISSING"
+            req = "Required" if info['required'] else "Optional"
+            ver = info['version'] or 'N/A'
+            print(f"  {info['label']}: {status} ({ver}) [{req}]")
         return 0
 
     elif args.command == 'update':

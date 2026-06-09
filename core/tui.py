@@ -3,7 +3,8 @@ SimPL TUI - Terminal User Interface
 
 A rich, interactive terminal UI that launches when you type just 'simpl'.
 Provides a menu-driven interface for running scripts, REPL mode, package
-management, auto-update checking, and SimPL Studio (basic code editor).
+management, auto-update checking, SimPL Studio (basic code editor),
+dependency setup, and package browsing.
 
 Supports: Linux, macOS, Windows, Termux (Android)
 Requires: Python 3.8+ (no external deps - uses only stdlib)
@@ -16,7 +17,13 @@ import subprocess
 import shutil
 import json
 import time
+import re
 from typing import Optional, List
+
+
+# ── Import from package_manager ────────────────────────────────────────────
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from package_manager import list_available_packages, install_package, get_dependency_status, check_node_available, check_curl_available, check_git_available, check_python_available
 
 
 # ── ANSI Colors (works on Linux, macOS, Termux; graceful on Windows) ──────
@@ -111,7 +118,7 @@ def _get_version() -> str:
         from simpl import VERSION
         return VERSION
     except Exception:
-        return "0.7.0"
+        return "0.8.0"
 
 
 # ── Auto-Update Checker ───────────────────────────────────────────────────
@@ -213,6 +220,8 @@ def draw_menu() -> str:
         (C.colorize("7", accent), "Show language reference"),
         (C.colorize("8", accent), "Create a new .simpl file"),
         (C.colorize("9", accent), "SimPL Studio (code editor)"),
+        (C.colorize("S", accent), "Setup & Dependencies"),
+        (C.colorize("B", accent), "Browse & Install Packages"),
         (C.colorize("A", accent), "About SimPL"),
         (C.colorize("U", accent), "Check for updates"),
         (C.colorize("0", accent), "Exit"),
@@ -261,6 +270,110 @@ def draw_box(title: str, content: str) -> str:
         lines.append(f"  {line}")
     lines.append(draw_separator("═"))
     return '\n'.join(lines)
+
+
+# ── Syntax Highlighting for SimPL Studio ───────────────────────────────────
+
+# SimPL keywords for syntax highlighting
+SIMPL_KEYWORDS = {
+    'let', 'if', 'then', 'elif', 'else', 'end', 'while', 'do', 'for', 'in',
+    'function', 'return', 'repeat', 'times', 'true', 'false', 'null', 'and',
+    'or', 'not', 'try', 'catch',
+}
+
+SIMPL_BUILTINS = {
+    'print', 'input', 'type', 'int', 'float', 'str', 'bool',
+    'abs', 'min', 'max', 'round', 'floor', 'ceil', 'sqrt', 'pow', 'random',
+    'upper', 'lower', 'trim', 'split', 'join', 'replace', 'len',
+    'push', 'pop', 'range', 'reverse', 'sort', 'contains', 'slice',
+    'keys', 'values', 'has_key', 'remove',
+    'read_file', 'write_file', 'append_file',
+    'time', 'sleep', 'env', 'shell',
+    'js_eval', 'get', 'post', 'parse_json', 'to_json',
+    'index_of', 'starts_with', 'ends_with',
+}
+
+
+def highlight_simpl_line(line: str) -> str:
+    """Apply basic syntax highlighting to a SimPL code line."""
+    C = Colors
+    if not C.supports_color():
+        return line
+
+    result = []
+    i = 0
+    length = len(line)
+
+    while i < length:
+        ch = line[i]
+
+        # Comment: # to end of line
+        if ch == '#':
+            result.append(C.colorize(line[i:], C.DIM))
+            break
+
+        # String: double-quoted
+        elif ch == '"':
+            j = i + 1
+            while j < length and line[j] != '"':
+                if line[j] == '\\':
+                    j += 1  # skip escaped char
+                j += 1
+            j = min(j + 1, length)  # include closing quote
+            result.append(C.colorize(line[i:j], C.GREEN))
+            i = j
+            continue
+
+        # String: single-quoted
+        elif ch == "'":
+            j = i + 1
+            while j < length and line[j] != "'":
+                if line[j] == '\\':
+                    j += 1
+                j += 1
+            j = min(j + 1, length)
+            result.append(C.colorize(line[i:j], C.GREEN))
+            i = j
+            continue
+
+        # Number
+        elif ch.isdigit() or (ch == '-' and i + 1 < length and line[i + 1].isdigit() and
+                              (i == 0 or not line[i - 1].isalnum() and line[i - 1] != '_')):
+            j = i
+            if ch == '-':
+                j += 1
+            while j < length and (line[j].isdigit() or line[j] == '.'):
+                j += 1
+            result.append(C.colorize(line[i:j], C.YELLOW))
+            i = j
+            continue
+
+        # Identifier / keyword
+        elif ch.isalpha() or ch == '_':
+            j = i
+            while j < length and (line[j].isalnum() or line[j] == '_'):
+                j += 1
+            word = line[i:j]
+            if word in SIMPL_KEYWORDS:
+                result.append(C.colorize(word, C.CYAN + C.BOLD))
+            elif word in SIMPL_BUILTINS:
+                result.append(C.colorize(word, C.BRIGHT_MAGENTA))
+            else:
+                result.append(word)
+            i = j
+            continue
+
+        # Operators and punctuation
+        elif ch in '=<>!+-*/%':
+            result.append(C.colorize(ch, C.BRIGHT_RED))
+            i += 1
+            continue
+
+        else:
+            result.append(ch)
+            i += 1
+
+    return ''.join(result)
 
 
 # ── Interactive Actions ────────────────────────────────────────────────────
@@ -518,31 +631,378 @@ print message
     input(C.colorize("\n  Press Enter to continue...", C.DIM))
 
 
+def action_setup_dependencies():
+    """Setup & Dependencies - show dependency status and install options."""
+    C = Colors
+    plat = get_platform()
+
+    while True:
+        print()
+        print(draw_separator("═"))
+        print(C.colorize("  Setup & Dependencies", C.BOLD + C.BRIGHT_MAGENTA))
+        print(C.colorize(f"  Platform: {plat.capitalize()}", C.DIM))
+        print(draw_separator("─"))
+
+        # Get dependency status
+        try:
+            deps = get_dependency_status()
+        except Exception:
+            deps = {
+                'python': {'available': True, 'version': platform.python_version(), 'required': True, 'label': 'Python (Required)'},
+                'node': {'available': False, 'version': None, 'required': False, 'label': 'Node.js (NPM Bridge)'},
+                'curl': {'available': False, 'version': None, 'required': True, 'label': 'curl (Required)'},
+                'git': {'available': False, 'version': None, 'required': False, 'label': 'git (Updates)'},
+            }
+
+        print()
+        print(C.colorize("  Dependency Status:", C.BOLD + C.BRIGHT_CYAN))
+        print()
+
+        for name, info in deps.items():
+            avail = info['available']
+            ver = info['version'] or 'N/A'
+            req = "Required" if info['required'] else "Optional"
+
+            if avail:
+                status_icon = C.colorize("✓", C.BRIGHT_GREEN + C.BOLD)
+                status_text = C.colorize(f"Available (v{ver})", C.BRIGHT_GREEN)
+            else:
+                status_icon = C.colorize("✗", C.BRIGHT_RED + C.BOLD)
+                status_text = C.colorize("Not found", C.BRIGHT_RED)
+
+            print(f"  {status_icon}  {info['label']}: {status_text}  [{C.colorize(req, C.DIM)}]")
+
+        # Show install instructions for missing dependencies
+        missing = {k: v for k, v in deps.items() if not v['available']}
+
+        if missing:
+            print()
+            print(C.colorize("  Install Commands:", C.BOLD + C.BRIGHT_YELLOW))
+            print()
+
+            if plat == 'termux':
+                if 'node' in missing:
+                    print(f"    Node.js:  {C.colorize('pkg install nodejs', C.BRIGHT_WHITE)}")
+                if 'curl' in missing:
+                    print(f"    curl:     {C.colorize('pkg install curl', C.BRIGHT_WHITE)}")
+                if 'git' in missing:
+                    print(f"    git:      {C.colorize('pkg install git', C.BRIGHT_WHITE)}")
+
+            elif plat == 'linux':
+                if 'node' in missing:
+                    print(f"    Node.js:  {C.colorize('sudo apt install nodejs', C.BRIGHT_WHITE)}")
+                if 'curl' in missing:
+                    print(f"    curl:     {C.colorize('sudo apt install curl', C.BRIGHT_WHITE)}")
+                if 'git' in missing:
+                    print(f"    git:      {C.colorize('sudo apt install git', C.BRIGHT_WHITE)}")
+
+            elif plat == 'macos':
+                cmds = []
+                if 'node' in missing:
+                    cmds.append('node')
+                if 'curl' in missing:
+                    cmds.append('curl')
+                if 'git' in missing:
+                    cmds.append('git')
+                if cmds:
+                    print(f"    All:      {C.colorize('brew install ' + ' '.join(cmds), C.BRIGHT_WHITE)}")
+
+            elif plat == 'windows':
+                if 'node' in missing:
+                    print(f"    Node.js:  {C.colorize('https://nodejs.org/en/download/', C.BRIGHT_WHITE)}")
+                if 'curl' in missing:
+                    print(f"    curl:     {C.colorize('Usually included with Windows 10+', C.DIM)}")
+                if 'git' in missing:
+                    print(f"    git:      {C.colorize('https://git-scm.com/download/win', C.BRIGHT_WHITE)}")
+
+            else:
+                if 'node' in missing:
+                    print(f"    Node.js:  Install from https://nodejs.org/")
+                if 'curl' in missing:
+                    print(f"    curl:     Install via your package manager")
+                if 'git' in missing:
+                    print(f"    git:      Install from https://git-scm.com/")
+
+            # Auto-install on supported platforms
+            if plat in ('termux', 'linux'):
+                print()
+                print(C.colorize("  Auto-Install:", C.BOLD + C.BRIGHT_CYAN))
+                if 'node' in missing:
+                    print(f"    [1] Install Node.js")
+                if 'curl' in missing:
+                    print(f"    [2] Install curl")
+                if 'git' in missing:
+                    print(f"    [3] Install git")
+                print(f"    [A] Install all missing")
+        else:
+            print()
+            print(C.colorize("  All dependencies satisfied! ✓", C.BRIGHT_GREEN + C.BOLD))
+
+        print()
+        print(C.colorize("  [R] Refresh  [Q] Back to menu", C.DIM))
+        print()
+
+        try:
+            choice = input(C.colorize("  setup> ", C.BRIGHT_GREEN + C.BOLD)).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            break
+
+        if choice in ('q', 'quit', 'back', ''):
+            break
+
+        elif choice == 'r':
+            continue
+
+        elif choice == '1' and 'node' in missing:
+            if plat == 'termux':
+                print(C.colorize("  Installing Node.js (pkg install nodejs)...", C.BRIGHT_YELLOW))
+                try:
+                    subprocess.run(['pkg', 'install', 'nodejs', '-y'], check=False)
+                    print(C.colorize("  Done! Node.js installed.", C.BRIGHT_GREEN))
+                except Exception as e:
+                    print(C.colorize(f"  Error: {e}", C.RED))
+            elif plat == 'linux':
+                print(C.colorize("  Installing Node.js (sudo apt install nodejs)...", C.BRIGHT_YELLOW))
+                try:
+                    subprocess.run(['sudo', 'apt', 'install', 'nodejs', '-y'], check=False)
+                    print(C.colorize("  Done! Node.js installed.", C.BRIGHT_GREEN))
+                except Exception as e:
+                    print(C.colorize(f"  Error: {e}", C.RED))
+            else:
+                print(C.colorize("  Auto-install not supported on this platform.", C.BRIGHT_YELLOW))
+            input(C.colorize("\n  Press Enter to continue...", C.DIM))
+
+        elif choice == '2' and 'curl' in missing:
+            if plat == 'termux':
+                print(C.colorize("  Installing curl (pkg install curl)...", C.BRIGHT_YELLOW))
+                try:
+                    subprocess.run(['pkg', 'install', 'curl', '-y'], check=False)
+                    print(C.colorize("  Done! curl installed.", C.BRIGHT_GREEN))
+                except Exception as e:
+                    print(C.colorize(f"  Error: {e}", C.RED))
+            elif plat == 'linux':
+                print(C.colorize("  Installing curl (sudo apt install curl)...", C.BRIGHT_YELLOW))
+                try:
+                    subprocess.run(['sudo', 'apt', 'install', 'curl', '-y'], check=False)
+                    print(C.colorize("  Done! curl installed.", C.BRIGHT_GREEN))
+                except Exception as e:
+                    print(C.colorize(f"  Error: {e}", C.RED))
+            else:
+                print(C.colorize("  Auto-install not supported on this platform.", C.BRIGHT_YELLOW))
+            input(C.colorize("\n  Press Enter to continue...", C.DIM))
+
+        elif choice == '3' and 'git' in missing:
+            if plat == 'termux':
+                print(C.colorize("  Installing git (pkg install git)...", C.BRIGHT_YELLOW))
+                try:
+                    subprocess.run(['pkg', 'install', 'git', '-y'], check=False)
+                    print(C.colorize("  Done! git installed.", C.BRIGHT_GREEN))
+                except Exception as e:
+                    print(C.colorize(f"  Error: {e}", C.RED))
+            elif plat == 'linux':
+                print(C.colorize("  Installing git (sudo apt install git)...", C.BRIGHT_YELLOW))
+                try:
+                    subprocess.run(['sudo', 'apt', 'install', 'git', '-y'], check=False)
+                    print(C.colorize("  Done! git installed.", C.BRIGHT_GREEN))
+                except Exception as e:
+                    print(C.colorize(f"  Error: {e}", C.RED))
+            else:
+                print(C.colorize("  Auto-install not supported on this platform.", C.BRIGHT_YELLOW))
+            input(C.colorize("\n  Press Enter to continue...", C.DIM))
+
+        elif choice == 'a':
+            if plat == 'termux':
+                pkgs = []
+                if 'node' in missing:
+                    pkgs.append('nodejs')
+                if 'curl' in missing:
+                    pkgs.append('curl')
+                if 'git' in missing:
+                    pkgs.append('git')
+                if pkgs:
+                    print(C.colorize(f"  Installing: {', '.join(pkgs)}...", C.BRIGHT_YELLOW))
+                    try:
+                        subprocess.run(['pkg', 'install'] + pkgs + ['-y'], check=False)
+                        print(C.colorize("  Done! All missing packages installed.", C.BRIGHT_GREEN))
+                    except Exception as e:
+                        print(C.colorize(f"  Error: {e}", C.RED))
+            elif plat == 'linux':
+                pkgs = []
+                if 'node' in missing:
+                    pkgs.append('nodejs')
+                if 'curl' in missing:
+                    pkgs.append('curl')
+                if 'git' in missing:
+                    pkgs.append('git')
+                if pkgs:
+                    print(C.colorize(f"  Installing: {', '.join(pkgs)}...", C.BRIGHT_YELLOW))
+                    try:
+                        subprocess.run(['sudo', 'apt', 'install'] + pkgs + ['-y'], check=False)
+                        print(C.colorize("  Done! All missing packages installed.", C.BRIGHT_GREEN))
+                    except Exception as e:
+                        print(C.colorize(f"  Error: {e}", C.RED))
+            elif plat == 'macos':
+                pkgs = []
+                if 'node' in missing:
+                    pkgs.append('node')
+                if 'curl' in missing:
+                    pkgs.append('curl')
+                if 'git' in missing:
+                    pkgs.append('git')
+                if pkgs:
+                    print(C.colorize(f"  Installing: {', '.join(pkgs)} via brew...", C.BRIGHT_YELLOW))
+                    try:
+                        subprocess.run(['brew', 'install'] + pkgs, check=False)
+                        print(C.colorize("  Done! All missing packages installed.", C.BRIGHT_GREEN))
+                    except Exception as e:
+                        print(C.colorize(f"  Error: {e}", C.RED))
+            else:
+                print(C.colorize("  Auto-install not supported on this platform.", C.BRIGHT_YELLOW))
+            input(C.colorize("\n  Press Enter to continue...", C.DIM))
+
+
+def action_browse_packages():
+    """Browse & Install Packages - list available packages and let user pick one."""
+    C = Colors
+
+    print()
+    print(C.colorize("  Fetching available packages...", C.BRIGHT_YELLOW))
+
+    try:
+        packages = list_available_packages()
+    except Exception as e:
+        print(C.colorize(f"  Error fetching packages: {e}", C.RED))
+        input(C.colorize("\n  Press Enter to continue...", C.DIM))
+        return
+
+    if not packages:
+        print(C.colorize("  No packages available.", C.BRIGHT_YELLOW))
+        input(C.colorize("\n  Press Enter to continue...", C.DIM))
+        return
+
+    while True:
+        print()
+        print(draw_separator("═"))
+        print(C.colorize("  Browse & Install Packages", C.BOLD + C.BRIGHT_MAGENTA))
+        print(C.colorize(f"  {len(packages)} package(s) available", C.DIM))
+        print(draw_separator("─"))
+        print()
+
+        for idx, pkg in enumerate(packages, 1):
+            name = pkg.get('name', 'unknown')
+            version = pkg.get('version', '0.0.0')
+            description = pkg.get('description', 'No description')
+            author = pkg.get('author', '')
+
+            num = C.colorize(f"{idx:2d}", C.BRIGHT_CYAN)
+            pkg_name = C.colorize(name, C.BRIGHT_WHITE + C.BOLD)
+            pkg_ver = C.colorize(f"v{version}", C.BRIGHT_GREEN)
+            pkg_desc = C.colorize(f" - {description}", C.DIM)
+
+            print(f"  {num}. {pkg_name} {pkg_ver}{pkg_desc}")
+
+        print()
+        print(C.colorize("  Enter number to install, or [Q] to go back", C.DIM))
+        print()
+
+        try:
+            choice = input(C.colorize("  browse> ", C.BRIGHT_GREEN + C.BOLD)).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            break
+
+        if choice in ('q', 'quit', 'back', ''):
+            break
+
+        # Try to parse as a number
+        try:
+            num = int(choice)
+            if 1 <= num <= len(packages):
+                pkg = packages[num - 1]
+                pkg_name = pkg.get('name', '')
+                pkg_ver = pkg.get('version', '?')
+                pkg_desc = pkg.get('description', '')
+
+                print()
+                print(C.colorize(f"  Installing: {pkg_name} v{pkg_ver}", C.BRIGHT_YELLOW))
+                print(C.colorize(f"  {pkg_desc}", C.DIM))
+                print()
+
+                try:
+                    result = install_package(pkg_name)
+                    if result:
+                        print(C.colorize(f"  Successfully installed {pkg_name}!", C.BRIGHT_GREEN))
+                    else:
+                        print(C.colorize(f"  Could not install {pkg_name}.", C.BRIGHT_YELLOW))
+                except Exception as e:
+                    print(C.colorize(f"  Error installing package: {e}", C.RED))
+
+                input(C.colorize("\n  Press Enter to continue...", C.DIM))
+            else:
+                print(C.colorize(f"  Invalid number: {num}. Choose 1-{len(packages)}.", C.RED))
+                input(C.colorize("\n  Press Enter to continue...", C.DIM))
+        except ValueError:
+            print(C.colorize(f"  Invalid input. Enter a number or Q to go back.", C.RED))
+            input(C.colorize("\n  Press Enter to continue...", C.DIM))
+
+
 def action_studio():
-    """SimPL Studio - A basic in-terminal code editor."""
+    """SimPL Studio - An in-terminal code editor with syntax highlighting."""
     C = Colors
 
     print()
     print(draw_separator("═"))
-    print(C.colorize("  SimPL Studio v1.0", C.BOLD + C.BRIGHT_MAGENTA))
-    print(C.colorize("  A simple code editor for .simpl files", C.DIM))
+    print(C.colorize("  SimPL Studio v2.0", C.BOLD + C.BRIGHT_MAGENTA))
+    print(C.colorize("  A code editor for .simpl files with syntax highlighting", C.DIM))
     print(draw_separator("─"))
     print()
     print(C.colorize("  Commands:", C.BOLD + C.BRIGHT_CYAN))
     print(C.colorize("    :save <filename>   Save to file", C.BRIGHT_WHITE))
     print(C.colorize("    :run               Run the current code", C.BRIGHT_WHITE))
-    print(C.colorize("    :clear             Clear the editor", C.BRIGHT_WHITE))
     print(C.colorize("    :load <filename>   Load a file into editor", C.BRIGHT_WHITE))
+    print(C.colorize("    :new               Clear and start fresh", C.BRIGHT_WHITE))
+    print(C.colorize("    :clear             Clear the editor", C.BRIGHT_WHITE))
+    print(C.colorize("    :help              Show all editor commands", C.BRIGHT_WHITE))
     print(C.colorize("    :quit              Exit studio", C.BRIGHT_WHITE))
     print()
 
     code_lines = []
     current_file = None
 
+    def _show_help():
+        """Show studio help."""
+        print()
+        print(draw_separator("─"))
+        print(C.colorize("  SimPL Studio Commands:", C.BOLD + C.BRIGHT_CYAN))
+        print()
+        print(C.colorize("    :save <filename>   Save code to a file", C.BRIGHT_WHITE))
+        print(C.colorize("    :save              Save to current file (if loaded)", C.BRIGHT_WHITE))
+        print(C.colorize("    :run               Run the current code", C.BRIGHT_WHITE))
+        print(C.colorize("    :load <filename>   Load a file into the editor", C.BRIGHT_WHITE))
+        print(C.colorize("    :new               Clear editor and start fresh", C.BRIGHT_WHITE))
+        print(C.colorize("    :clear             Clear all lines from editor", C.BRIGHT_WHITE))
+        print(C.colorize("    :help              Show this help message", C.BRIGHT_WHITE))
+        print(C.colorize("    :quit  or  :q      Exit SimPL Studio", C.BRIGHT_WHITE))
+        print()
+        print(C.colorize("  Syntax Highlighting:", C.BOLD + C.BRIGHT_CYAN))
+        print(C.colorize("    Keywords", C.CYAN + C.BOLD) + "  " +
+              C.colorize("Strings", C.GREEN) + "  " +
+              C.colorize("Comments", C.DIM) + "  " +
+              C.colorize("Numbers", C.YELLOW) + "  " +
+              C.colorize("Built-ins", C.BRIGHT_MAGENTA))
+        print(draw_separator("─"))
+        print()
+
     while True:
         try:
             line_num = len(code_lines) + 1
-            prompt = C.colorize(f"  {line_num:3d} | ", C.BRIGHT_CYAN)
+            # Show current file name in prompt
+            if current_file:
+                file_label = C.colorize(f"[{current_file}]", C.BRIGHT_YELLOW)
+                prompt = C.colorize(f"  {line_num:3d} | ", C.BRIGHT_CYAN) + file_label + " "
+            else:
+                prompt = C.colorize(f"  {line_num:3d} | ", C.BRIGHT_CYAN)
             line = input(prompt)
         except (KeyboardInterrupt, EOFError):
             print()
@@ -566,7 +1026,7 @@ def action_studio():
                 with open(filename, 'w') as f:
                     f.write('\n'.join(code_lines))
                 current_file = filename
-                print(C.colorize(f"  Saved to {filename}", C.BRIGHT_GREEN))
+                print(C.colorize(f"  Saved to {filename} ({len(code_lines)} lines)", C.BRIGHT_GREEN))
             except Exception as e:
                 print(C.colorize(f"  Error saving: {e}", C.RED))
 
@@ -592,6 +1052,11 @@ def action_studio():
                 if os.path.exists(tmp_file):
                     os.unlink(tmp_file)
 
+        elif stripped == ':new':
+            code_lines = []
+            current_file = None
+            print(C.colorize("  Editor cleared. Starting fresh.", C.BRIGHT_GREEN))
+
         elif stripped == ':clear':
             code_lines = []
             print(C.colorize("  Editor cleared.", C.BRIGHT_GREEN))
@@ -609,13 +1074,26 @@ def action_studio():
                 with open(filename, 'r') as f:
                     code_lines = f.read().split('\n')
                 current_file = filename
+                # Remove trailing empty line if present
+                if code_lines and code_lines[-1] == '':
+                    code_lines = code_lines[:-1]
                 print(C.colorize(f"  Loaded {filename} ({len(code_lines)} lines)", C.BRIGHT_GREEN))
+                # Show the loaded code with syntax highlighting
+                for i, code_line in enumerate(code_lines):
+                    highlighted = highlight_simpl_line(code_line)
+                    print(C.colorize(f"  {i+1:3d} | ", C.BRIGHT_CYAN) + highlighted)
             except Exception as e:
                 print(C.colorize(f"  Error loading: {e}", C.RED))
 
+        elif stripped == ':help':
+            _show_help()
+
         else:
-            # Regular code line
+            # Regular code line - show with syntax highlighting feedback
             code_lines.append(line)
+            # Echo the line back with highlighting
+            highlighted = highlight_simpl_line(line)
+            print(f"  {'':>3s}   {highlighted}")
 
 
 def action_about():
@@ -663,6 +1141,7 @@ and games.
   - Smart Error Messages
   - Interactive REPL, TUI, and Studio
   - Auto-Update Checker
+  - Dependency Setup & Auto-Installer
 
 {C.colorize("Environment:", C.BOLD)}
   Platform:    {plat}
@@ -721,6 +1200,10 @@ MENU_ACTIONS = {
     '7': action_show_reference,
     '8': action_new_file,
     '9': action_studio,
+    's': action_setup_dependencies,
+    'S': action_setup_dependencies,
+    'b': action_browse_packages,
+    'B': action_browse_packages,
     'a': action_about,
     'A': action_about,
     'u': action_check_updates,

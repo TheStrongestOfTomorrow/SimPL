@@ -6,7 +6,7 @@
 
 *Reads like English. Runs anywhere. Batteries included.*
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/TheStrongestOfTomorrow/SimPL)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/TheStrongestOfTomorrow/SimPL)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-3776AB.svg)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/NPM%20Bridge-Node.js-339933.svg)](https://nodejs.org/)
@@ -138,7 +138,7 @@ simpl --repl
 ```
 
 ```
-SimPL Interactive v0.7.0
+SimPL Interactive v0.8.0
 Type 'exit' or 'quit' to exit, 'help' for help.
 
 simpl> let x = 42
@@ -166,7 +166,7 @@ simpl
   ███████║██║██║ ╚═╝ ██║
   ╚══════╝╚═╝╚═╝     ╚═╝
 
-  The Simple Programming Language v0.7.0
+  The Simple Programming Language v0.8.0
   Platform: Linux | Python 3.12.0
 
   ┌──────────────────────────────────────┐
@@ -180,7 +180,11 @@ simpl
   │  6. Check script for errors          │
   │  7. Show language reference          │
   │  8. Create a new .simpl file         │
-  │  9. About SimPL                      │
+  │  9. SimPL Studio (code editor)       │
+  │  S. Setup & Dependencies             │
+  │  B. Browse & Install Packages         │
+  │  A. About SimPL                      │
+  │  U. Check for updates                │
   │  0. Exit                             │
   └──────────────────────────────────────┘
 
@@ -194,6 +198,10 @@ simpl
 - **Zero external dependencies** — built entirely with Python's standard library
 - **Interactive workflow** — run scripts, manage packages, create files, and view the language reference without leaving the TUI
 - **Platform-aware** — detects your OS and Python version automatically
+- **Setup & Dependencies** (option S) — checks Python, Node.js, curl, and git status; auto-installs missing deps on Linux/Termux
+- **Browse & Install Packages** (option B) — browse available community packages and install with one click
+- **SimPL Studio** (option 9) — in-terminal code editor with syntax highlighting, save/load/run
+- **Auto-update checker** — checks GitHub for new versions on startup
 
 You can also launch the TUI explicitly with `simpl --tui`.
 
@@ -776,6 +784,8 @@ Commands:
   install npm:<package>           Install an NPM package (JS Bridge)
   uninstall <package>             Uninstall a package
   list                            List installed packages
+  available                       List available packages in the registry
+  deps                            Check dependency status (Python, Node.js, curl, git)
 
 Options:
   --tui                           Launch Terminal User Interface

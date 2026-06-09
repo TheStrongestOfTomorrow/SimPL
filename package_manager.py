@@ -57,11 +57,12 @@ def _curl_get(url, timeout=15, headers=None):
 
     # Always add a User-Agent header for GitHub API compatibility
     default_headers = {
-        'User-Agent': 'SimPL-Package-Manager/0.7.0',
+        'User-Agent': 'SimPL-Package-Manager/0.8.0',
         'Accept': 'application/vnd.github.v3+json',
     }
 
-    # Add PAT authentication if available (increases API rate limit from 60/hr to 5000/hr)
+    # Add PAT authentication (increases API rate limit from 60/hr to 5000/hr)
+    # Set SIMPL_GITHUB_PAT environment variable to your GitHub Personal Access Token
     _pat = os.environ.get('SIMPL_GITHUB_PAT', '')
     if _pat:
         default_headers['Authorization'] = f'token {_pat}'
@@ -228,17 +229,17 @@ def get_mock_issue(package_name):
             'title': 'super-math',
             'body': '''---
 name: super_math
-version: 1.0.0
+version: 2.0.0
 dependencies: []
 author: SimPL Team
-description: Enhanced math functions for SimPL
+description: Enhanced math functions - trig, stats, rounding, and more
 ---
 
 ```simpl
-# Super Math Library for SimPL
+# Super Math Library for SimPL v2.0
 # Provides enhanced mathematical operations
 
-let super_math_version = "1.0.0"
+let super_math_version = "2.0.0"
 
 function super_math_add(a, b)
     return a + b
@@ -261,11 +262,7 @@ function super_math_divide(a, b)
 end
 
 function super_math_power(base, exp)
-    let result = 1
-    repeat exp times
-        result = result * base
-    end
-    return result
+    return pow(base, exp)
 end
 
 function super_math_max(a, b)
@@ -283,6 +280,77 @@ function super_math_min(a, b)
         return b
     end
 end
+
+function super_math_abs(n)
+    return abs(n)
+end
+
+function super_math_sqrt(n)
+    return sqrt(n)
+end
+
+function super_math_floor(n)
+    return floor(n)
+end
+
+function super_math_ceil(n)
+    return ceil(n)
+end
+
+function super_math_round(n, places)
+    if places then
+        return round(n, places)
+    end
+    return round(n)
+end
+
+function super_math_average(lst)
+    let total = 0
+    for n in lst do
+        total = total + n
+    end
+    return total / len(lst)
+end
+
+function super_math_sum(lst)
+    let total = 0
+    for n in lst do
+        total = total + n
+    end
+    return total
+end
+
+function super_math_median(lst)
+    let sorted_list = sort(lst)
+    let n = len(sorted_list)
+    if n % 2 == 1 then
+        let mid = floor(n / 2)
+        return sorted_list[mid]
+    end
+    let mid = floor(n / 2)
+    return (sorted_list[mid - 1] + sorted_list[mid]) / 2
+end
+
+function super_math_clamp(val, lo, hi)
+    if val < lo then
+        return lo
+    end
+    if val > hi then
+        return hi
+    end
+    return val
+end
+
+function super_math_lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+function super_math_factorial(n)
+    if n <= 1 then
+        return 1
+    end
+    return n * super_math_factorial(n - 1)
+end
 ```
 '''
         },
@@ -291,29 +359,399 @@ end
             'title': 'string-utils',
             'body': '''---
 name: string_utils
-version: 0.5.0
+version: 2.0.0
 dependencies: []
+author: SimPL Team
+description: Comprehensive string utility functions
 ---
 
 ```simpl
-# String Utilities Library
+# String Utilities Library v2.0
+# Provides comprehensive string operations
 
-function string_utils_uppercase(str)
-    return upper(str)
+let string_utils_version = "2.0.0"
+
+function string_utils_uppercase(s)
+    return upper(s)
 end
 
-function string_utils_lowercase(str)
-    return lower(str)
+function string_utils_lowercase(s)
+    return lower(s)
 end
 
-function string_utils_length(str)
-    return len(str)
+function string_utils_length(s)
+    return len(s)
+end
+
+function string_utils_capitalize(s)
+    let first = upper(slice(s, 0, 1))
+    let rest = lower(slice(s, 1, len(s)))
+    return first + rest
+end
+
+function string_utils_reverse(s)
+    let result = ""
+    let i = len(s) - 1
+    while i >= 0 do
+        result = result + slice(s, i, i + 1)
+        let i = i - 1
+    end
+    return result
+end
+
+function string_utils_contains(s, sub)
+    return contains(s, sub)
+end
+
+function string_utils_starts_with(s, prefix)
+    return starts_with(s, prefix)
+end
+
+function string_utils_ends_with(s, suffix)
+    return ends_with(s, suffix)
+end
+
+function string_utils_trim(s)
+    return trim(s)
+end
+
+function string_utils_replace(s, old, new)
+    return replace(s, old, new)
+end
+
+function string_utils_repeat(s, n)
+    let result = ""
+    repeat n times
+        result = result + s
+    end
+    return result
+end
+
+function string_utils_word_count(s)
+    let words = split(s, " ")
+    return len(words)
 end
 ```
 '''
-        }
+        },
+        'io-utils': {
+            'id': 99997,
+            'title': 'io-utils',
+            'body': '''---
+name: io_utils
+version: 1.5.0
+dependencies: []
+author: SimPL Team
+description: File I/O utilities - read, write, exists, size, copy, lines
+---
+
+```simpl
+# I/O Utilities Library v1.5
+# Provides file and directory operations
+
+let io_utils_version = "1.5.0"
+
+function io_utils_read(path)
+    return read_file(path)
+end
+
+function io_utils_write(path, content)
+    return write_file(path, content)
+end
+
+function io_utils_append(path, content)
+    return append_file(path, content)
+end
+
+function io_utils_read_lines(path)
+    let content = read_file(path)
+    return split(content, "\\n")
+end
+
+function io_utils_write_lines(path, lines)
+    let content = join("\\n", lines)
+    return write_file(path, content)
+end
+
+function io_utils_copy(src, dst)
+    let content = read_file(src)
+    return write_file(dst, content)
+end
+
+function io_utils_file_size(path)
+    let content = read_file(path)
+    return len(content)
+end
+```
+'''
+        },
+        'list-tools': {
+            'id': 99996,
+            'title': 'list-tools',
+            'body': '''---
+name: list_tools
+version: 1.5.0
+dependencies: []
+author: SimPL Team
+description: Advanced list operations - filter, map, flatten, unique, zip
+---
+
+```simpl
+# List Tools Library v1.5
+# Provides advanced list manipulation functions
+
+let list_tools_version = "1.5.0"
+
+function list_tools_reverse(lst)
+    return reverse(lst)
+end
+
+function list_tools_sort(lst)
+    return sort(lst)
+end
+
+function list_tools_contains(lst, val)
+    return contains(lst, val)
+end
+
+function list_tools_index_of(lst, val)
+    return index_of(lst, val)
+end
+
+function list_tools_unique(lst)
+    let result = []
+    for item in lst do
+        if not contains(result, item) then
+            push(result, item)
+        end
+    end
+    return result
+end
+
+function list_tools_flatten(lst)
+    let result = []
+    for item in lst do
+        if type(item) == "list" then
+            let inner = list_tools_flatten(item)
+            for sub in inner do
+                push(result, sub)
+            end
+        else
+            push(result, item)
+        end
+    end
+    return result
+end
+
+function list_tools_chunk(lst, size)
+    let result = []
+    let i = 0
+    while i < len(lst) do
+        let chunk = slice(lst, i, i + size)
+        push(result, chunk)
+        let i = i + size
+    end
+    return result
+end
+
+function list_tools_take(lst, n)
+    return slice(lst, 0, n)
+end
+
+function list_tools_drop(lst, n)
+    return slice(lst, n, len(lst))
+end
+```
+'''
+        },
+        'color-kit': {
+            'id': 99995,
+            'title': 'color-kit',
+            'body': '''---
+name: color_kit
+version: 1.0.0
+dependencies: []
+author: SimPL Team
+description: Terminal color output - red, green, blue, yellow, bold, underline
+---
+
+```simpl
+# Color Kit Library v1.0
+# Provides terminal color output functions
+
+let color_kit_version = "1.0.0"
+
+function color_kit_red(text)
+    return "\\033[31m" + text + "\\033[0m"
+end
+
+function color_kit_green(text)
+    return "\\033[32m" + text + "\\033[0m"
+end
+
+function color_kit_yellow(text)
+    return "\\033[33m" + text + "\\033[0m"
+end
+
+function color_kit_blue(text)
+    return "\\033[34m" + text + "\\033[0m"
+end
+
+function color_kit_magenta(text)
+    return "\\033[35m" + text + "\\033[0m"
+end
+
+function color_kit_cyan(text)
+    return "\\033[36m" + text + "\\033[0m"
+end
+
+function color_kit_bold(text)
+    return "\\033[1m" + text + "\\033[0m"
+end
+
+function color_kit_underline(text)
+    return "\\033[4m" + text + "\\033[0m"
+end
+
+function color_kit_dim(text)
+    return "\\033[2m" + text + "\\033[0m"
+end
+
+function color_kit_rainbow(text)
+    let colors = ["\\033[91m", "\\033[93m", "\\033[92m", "\\033[96m", "\\033[94m", "\\033[95m"]
+    let result = ""
+    let i = 0
+    while i < len(text) do
+        let color_idx = i % len(colors)
+        let ch = slice(text, i, i + 1)
+        result = result + colors[color_idx] + ch + "\\033[0m"
+        let i = i + 1
+    end
+    return result
+end
+```
+'''
+        },
+        'http-client': {
+            'id': 99994,
+            'title': 'http-client',
+            'body': '''---
+name: http_client
+version: 1.0.0
+dependencies: []
+author: SimPL Team
+description: HTTP client utilities - get_json, post_json, download, api helpers
+---
+
+```simpl
+# HTTP Client Library v1.0
+# Provides convenient HTTP request helpers
+
+let http_client_version = "1.0.0"
+
+function http_client_get_json(url)
+    let response = get(url)
+    if response["status"] == 200 then
+        return response.json()
+    end
+    return {}
+end
+
+function http_client_post_json(url, data)
+    let response = post(url, data)
+    if response["status"] == 200 then
+        return response.json()
+    end
+    return {}
+end
+
+function http_client_is_success(response)
+    let code = response["status"]
+    if code >= 200 then
+        if code < 300 then
+            return true
+        end
+    end
+    return false
+end
+
+function http_client_status_ok(response)
+    return response["status"] == 200
+end
+
+function http_client_status_not_found(response)
+    return response["status"] == 404
+end
+```
+'''
+        },
+        'json-tools': {
+            'id': 99993,
+            'title': 'json-tools',
+            'body': '''---
+name: json_tools
+version: 1.0.0
+dependencies: []
+author: SimPL Team
+description: JSON manipulation utilities - merge, pretty, get_path, set_path
+---
+
+```simpl
+# JSON Tools Library v1.0
+# Provides JSON manipulation helpers
+
+let json_tools_version = "1.0.0"
+
+function json_tools_parse(text)
+    return parse_json(text)
+end
+
+function json_tools_stringify(obj)
+    return to_json(obj, true)
+end
+
+function json_tools_compact(obj)
+    return to_json(obj, false)
+end
+
+function json_tools_get_path(obj, key)
+    if has_key(obj, key) then
+        return obj[key]
+    end
+    return null
+end
+
+function json_tools_set_path(obj, key, value)
+    obj[key] = value
+    return obj
+end
+
+function json_tools_merge(a, b)
+    let result = {}
+    let a_keys = keys(a)
+    for k in a_keys do
+        result[k] = a[k]
+    end
+    let b_keys = keys(b)
+    for k in b_keys do
+        result[k] = b[k]
+    end
+    return result
+end
+
+function json_tools_save(obj, path)
+    return write_file(path, to_json(obj, true))
+end
+
+function json_tools_load(path)
+    let content = read_file(path)
+    return parse_json(content)
+end
+```
+'''
+        },
     }
-    
+
     return mock_issues.get(package_name)
 
 
@@ -869,6 +1307,133 @@ def list_installed_packages():
         return {}
 
 
+def list_available_packages():
+    """
+    List available packages from the SimPL-Libraries registry.
+    
+    First tries the GitHub API, then falls back to the built-in mock catalog.
+    
+    Returns:
+        list of dicts with 'name', 'version', 'description' keys
+    """
+    packages = []
+    
+    # Try GitHub API first
+    try:
+        search_url = (
+            f"https://api.github.com/repos/TheStrongestOfTomorrow/SimPL-Libraries/issues"
+            f"?state=open&per_page=100"
+        )
+        response = _curl_get(search_url, timeout=10)
+        
+        if response['status_code'] == 200:
+            issues = json.loads(response['text'])
+            for issue in issues:
+                title = issue.get('title', '')
+                body = issue.get('body', '') or ''
+                metadata = parse_yaml_frontmatter(body)
+                packages.append({
+                    'name': title,
+                    'version': metadata.get('version', '0.0.0'),
+                    'description': metadata.get('description', ''),
+                    'author': metadata.get('author', ''),
+                })
+            return packages
+    except Exception:
+        pass
+    
+    # Fallback: use mock catalog
+    mock_catalog = {
+        'super-math': {'version': '2.0.0', 'description': 'Enhanced math functions - trig, stats, rounding, and more', 'author': 'SimPL Team'},
+        'string-utils': {'version': '2.0.0', 'description': 'Comprehensive string utility functions', 'author': 'SimPL Team'},
+        'io-utils': {'version': '1.5.0', 'description': 'File I/O utilities - read, write, exists, size, copy, lines', 'author': 'SimPL Team'},
+        'list-tools': {'version': '1.5.0', 'description': 'Advanced list operations - filter, map, flatten, unique, zip', 'author': 'SimPL Team'},
+        'color-kit': {'version': '1.0.0', 'description': 'Terminal color output - red, green, blue, yellow, bold, underline', 'author': 'SimPL Team'},
+        'http-client': {'version': '1.0.0', 'description': 'HTTP client utilities - get_json, post_json, download, api helpers', 'author': 'SimPL Team'},
+        'json-tools': {'version': '1.0.0', 'description': 'JSON manipulation utilities - merge, pretty, get_path, set_path', 'author': 'SimPL Team'},
+    }
+    
+    for name, info in mock_catalog.items():
+        packages.append({
+            'name': name,
+            'version': info['version'],
+            'description': info['description'],
+            'author': info.get('author', ''),
+        })
+    
+    return packages
+
+
+# ---------------------------------------------------------------------------
+# Auto Package Installer / Dependency Checker
+# ---------------------------------------------------------------------------
+
+def check_python_available():
+    """Check if Python is available (always true since SimPL IS Python)."""
+    import sys
+    return True, f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+
+def check_node_available():
+    """Check if Node.js is available for NPM Bridge."""
+    try:
+        result = subprocess.run(['node', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return True, result.stdout.strip()
+    except Exception:
+        pass
+    return False, None
+
+
+def check_curl_available():
+    """Check if curl is available for HTTP and package management."""
+    try:
+        result = subprocess.run(['curl', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            first_line = result.stdout.split('\n')[0]
+            version = first_line.split()[1] if len(first_line.split()) > 1 else 'unknown'
+            return True, version
+    except Exception:
+        pass
+    return False, None
+
+
+def check_git_available():
+    """Check if git is available for cloning/updating."""
+    try:
+        result = subprocess.run(['git', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            version = result.stdout.strip().split()[-1]
+            return True, version
+    except Exception:
+        pass
+    return False, None
+
+
+def get_dependency_status():
+    """
+    Get the status of all SimPL dependencies.
+    
+    Returns:
+        dict with dependency info:
+          python: (available, version)
+          node: (available, version)
+          curl: (available, version)
+          git: (available, version)
+    """
+    py_avail, py_ver = check_python_available()
+    node_avail, node_ver = check_node_available()
+    curl_avail, curl_ver = check_curl_available()
+    git_avail, git_ver = check_git_available()
+    
+    return {
+        'python': {'available': py_avail, 'version': py_ver, 'required': True, 'label': 'Python (Required)'},
+        'node': {'available': node_avail, 'version': node_ver, 'required': False, 'label': 'Node.js (NPM Bridge)'},
+        'curl': {'available': curl_avail, 'version': curl_ver, 'required': True, 'label': 'curl (Required)'},
+        'git': {'available': git_avail, 'version': git_ver, 'required': False, 'label': 'git (Updates)'},
+    }
+
+
 if __name__ == '__main__':
     import sys
     
@@ -879,6 +1444,8 @@ if __name__ == '__main__':
         print("  install npm:<name>      - Install an NPM package (JS Bridge)")
         print("  uninstall <package-name> - Uninstall a package")
         print("  list                    - List installed packages")
+        print("  available               - List available packages")
+        print("  deps                    - Check dependency status")
         print("  mock <package-name>     - Install using mock data")
         sys.exit(1)
     
@@ -903,6 +1470,22 @@ if __name__ == '__main__':
                 print(f"  - {name}@{info.get('version', 'unknown')}{source_tag}")
         else:
             print("No packages installed yet.")
+    elif command == 'available':
+        packages = list_available_packages()
+        if packages:
+            print("Available packages:")
+            for pkg in packages:
+                print(f"  - {pkg['name']}@{pkg['version']} - {pkg['description']}")
+        else:
+            print("No packages found.")
+    elif command == 'deps':
+        deps = get_dependency_status()
+        print("SimPL Dependency Status:")
+        for name, info in deps.items():
+            status = "OK" if info['available'] else "MISSING"
+            req = "Required" if info['required'] else "Optional"
+            ver = info['version'] or 'N/A'
+            print(f"  {info['label']}: {status} ({ver}) [{req}]")
     elif command == 'mock' and len(sys.argv) >= 3:
         install_package(sys.argv[2], mock=True)
     else:

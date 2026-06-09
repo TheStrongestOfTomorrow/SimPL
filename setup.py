@@ -170,7 +170,7 @@ def uninstall():
 def install():
     """Install the simpl command globally."""
     print("=" * 50)
-    print("  SimPL Installer")
+    print("  SimPL Installer v0.8.0")
     print("=" * 50)
     print()
 
@@ -179,7 +179,18 @@ def install():
     if py_ver < (3, 8):
         print(f"Error: SimPL requires Python 3.8+. You have {py_ver.major}.{py_ver.minor}.")
         sys.exit(1)
-    print(f"  Python: {py_ver.major}.{py_ver.minor}.{py_ver.micro} ✓")
+    print(f"  Python: {py_ver.major}.{py_ver.minor}.{py_ver.micro} ✓ (Required)")
+
+    # Check for curl (required for package management)
+    try:
+        result = subprocess.run(['curl', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            first_line = result.stdout.split('\n')[0]
+            print(f"  curl:    {first_line.split()[1]} ✓ (Required)")
+        else:
+            print("  curl:    Not found! (Required for package management and HTTP)")
+    except Exception:
+        print("  curl:    Not found! (Required for package management and HTTP)")
 
     # Check for Node.js (optional)
     try:
@@ -190,6 +201,16 @@ def install():
             print("  Node.js: Not found (optional, needed for NPM Bridge)")
     except Exception:
         print("  Node.js: Not found (optional, needed for NPM Bridge)")
+
+    # Check for git (optional)
+    try:
+        result = subprocess.run(['git', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            print(f"  git:     {result.stdout.strip().split()[-1]} ✓ (Updates)")
+        else:
+            print("  git:     Not found (optional, needed for auto-updates)")
+    except Exception:
+        print("  git:     Not found (optional, needed for auto-updates)")
 
     # Get directories
     source_dir = get_simpl_source_dir()
