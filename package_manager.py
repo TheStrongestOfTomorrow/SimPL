@@ -57,9 +57,14 @@ def _curl_get(url, timeout=15, headers=None):
 
     # Always add a User-Agent header for GitHub API compatibility
     default_headers = {
-        'User-Agent': 'SimPL-Package-Manager/0.6.0',
+        'User-Agent': 'SimPL-Package-Manager/0.7.0',
         'Accept': 'application/vnd.github.v3+json',
     }
+
+    # Add PAT authentication if available (increases API rate limit from 60/hr to 5000/hr)
+    _pat = os.environ.get('SIMPL_GITHUB_PAT', '')
+    if _pat:
+        default_headers['Authorization'] = f'token {_pat}'
 
     if headers:
         default_headers.update(headers)
@@ -606,7 +611,7 @@ def install_npm_package(package_name):
 # Original install_package (SimPL-Libraries via GitHub Issues)
 # ---------------------------------------------------------------------------
 
-def install_package(package_name, repo_owner="thestrongestoftomorrow", repo_name="SimPL-Libraries", mock=False):
+def install_package(package_name, repo_owner="TheStrongestOfTomorrow", repo_name="SimPL-Libraries", mock=False):
     """
     Install a package from GitHub Issues or the NPM registry.
 

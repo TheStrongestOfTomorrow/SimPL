@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════
 # SimPL Quick Install Script for Windows
-# Usage:   irm https://raw.githubusercontent.com/thestrongestoftomorrow/SimPL/main/install.ps1 | iex
+# Usage:   irm https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.ps1 | iex
 #          OR:  .\install.ps1
 # ═══════════════════════════════════════════════════════════════
 
@@ -58,7 +58,7 @@ if (Test-Path $installDir) {
 } else {
     Write-Host ""
     Write-Host "  Cloning SimPL repository..."
-    git clone -q https://github.com/thestrongestoftomorrow/SimPL.git $installDir
+    git clone -q https://github.com/TheStrongestOfTomorrow/SimPL.git $installDir
 }
 
 Write-Host "  ✓ SimPL downloaded to $installDir" -ForegroundColor Green

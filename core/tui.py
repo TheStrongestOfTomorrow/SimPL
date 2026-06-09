@@ -111,7 +111,7 @@ def _get_version() -> str:
         from simpl import VERSION
         return VERSION
     except Exception:
-        return "0.6.0"
+        return "0.7.0"
 
 
 # ── Auto-Update Checker ───────────────────────────────────────────────────
@@ -126,7 +126,7 @@ def check_for_updates() -> Optional[str]:
     try:
         result = subprocess.run(
             ['curl', '-sS', '--max-time', '5',
-             'https://raw.githubusercontent.com/thestrongestoftomorrow/SimPL/main/simpl.py'],
+             'https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/simpl.py'],
             capture_output=True, text=True, timeout=8
         )
         if result.returncode != 0:
@@ -156,9 +156,9 @@ def get_update_instructions() -> str:
 
     # Default: re-run install script
     if plat in ('linux', 'macos', 'termux'):
-        return "  curl -sSL https://raw.githubusercontent.com/thestrongestoftomorrow/SimPL/main/install.sh | bash"
+        return "  curl -sSL https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.sh | bash"
     elif plat == 'windows':
-        return "  Download latest from: github.com/thestrongestoftomorrow/SimPL"
+        return "  Download latest from: github.com/TheStrongestOfTomorrow/SimPL"
     return "  git pull or re-run install script"
 
 
@@ -389,7 +389,7 @@ def action_show_reference():
     ref = f"""
 {C.colorize("VARIABLES", C.BOLD + C.BRIGHT_CYAN)}
   let name = "SimPL"        # String
-  let version = 0.6          # Number
+  let version = 0.7          # Number
   let is_cool = true         # Boolean
   let items = [1, 2, 3]     # List
   let config = {{"key": "val"}}  # Dict
@@ -671,8 +671,8 @@ and games.
   curl:        {curl_status}
 
 {C.colorize("Links:", C.BOLD)}
-  GitHub:  github.com/thestrongestoftomorrow/SimPL
-  Packages: github.com/thestrongestoftomorrow/SimPL-Libraries
+  GitHub:  github.com/TheStrongestOfTomorrow/SimPL
+  Packages: github.com/TheStrongestOfTomorrow/SimPL-Libraries
 
 {C.colorize("Update:", C.BOLD)}
   {get_update_instructions()}

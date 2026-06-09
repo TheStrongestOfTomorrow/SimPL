@@ -6,11 +6,11 @@
 
 *Reads like English. Runs anywhere. Batteries included.*
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/thestrongestoftomorrow/SimPL)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/TheStrongestOfTomorrow/SimPL)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-3776AB.svg)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/NPM%20Bridge-Node.js-339933.svg)](https://nodejs.org/)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Termux-lightgrey.svg)](https://github.com/thestrongestoftomorrow/SimPL)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Termux-lightgrey.svg)](https://github.com/TheStrongestOfTomorrow/SimPL)
 
 [Getting Started](#getting-started) · [TUI](#tui-terminal-user-interface) · [Examples](#examples) · [Language Reference](#language-reference) · [Architecture](#architecture) · [Contributing](#contributing)
 
@@ -73,7 +73,7 @@ The interpreter is written in Python and supports **three syntax flavors** out o
 |---|---|
 | **Readable** | Syntax reads like natural English — `if x > 5 then ... end` |
 | **Multi-flavor** | Write in Standard, C/JS, or Python style — all compile to the same AST |
-| **Batteries Included** | 40+ built-in functions for math, strings, lists, files, and I/O — no imports needed |
+| **Batteries Included** | 50+ built-in functions for math, strings, lists, files, HTTP, JSON, and I/O — no imports needed |
 | **Dictionaries** | First-class dict literals — `let person = {"name": "Alice", "age": 30}` |
 | **Error Handling** | `try` / `catch` blocks with `__error__` variable for robust programs |
 | **NPM Bridge** | Use any JavaScript library from NPM directly inside SimPL via `js_eval()` |
@@ -91,10 +91,10 @@ The interpreter is written in Python and supports **three syntax flavors** out o
 
 | Platform | Command |
 |----------|---------|
-| **Linux / macOS** | `curl -sSL https://raw.githubusercontent.com/thestrongestoftomorrow/SimPL/main/install.sh \| bash` |
-| **Windows (PowerShell)** | `irm https://raw.githubusercontent.com/thestrongestoftomorrow/SimPL/main/install.ps1 \| iex` |
-| **Termux (Android)** | `curl -sSL https://raw.githubusercontent.com/thestrongestoftomorrow/SimPL/main/install.sh \| bash` |
-| **From Source** | `git clone https://github.com/thestrongestoftomorrow/SimPL.git && cd SimPL && python setup.py` |
+| **Linux / macOS** | `curl -sSL https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.sh \| bash` |
+| **Windows (PowerShell)** | `irm https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.ps1 \| iex` |
+| **Termux (Android)** | `curl -sSL https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.sh \| bash` |
+| **From Source** | `git clone https://github.com/TheStrongestOfTomorrow/SimPL.git && cd SimPL && python setup.py` |
 
 #### Prerequisites
 
@@ -138,7 +138,7 @@ simpl --repl
 ```
 
 ```
-SimPL Interactive v0.5.0
+SimPL Interactive v0.7.0
 Type 'exit' or 'quit' to exit, 'help' for help.
 
 simpl> let x = 42
@@ -166,7 +166,7 @@ simpl
   ███████║██║██║ ╚═╝ ██║
   ╚══════╝╚═╝╚═╝     ╚═╝
 
-  The Simple Programming Language v0.5.0
+  The Simple Programming Language v0.7.0
   Platform: Linux | Python 3.12.0
 
   ┌──────────────────────────────────────┐
@@ -360,6 +360,34 @@ print result  # 1024
 # let _ = js_eval("require('lodash')")
 ```
 
+### HTTP Requests
+
+```simpl
+# GET request
+let response = get("https://api.github.com/repos/TheStrongestOfTomorrow/SimPL")
+print "Status: " + str(response["status"])
+
+# Parse JSON response
+let data = response.json()
+print "Stars: " + str(data["stargazers_count"])
+
+# POST request
+let result = post("https://httpbin.org/post", {"key": "value"})
+```
+
+### JSON Built-ins
+
+```simpl
+# Parse JSON string into SimPL dict
+let obj = parse_json('{"name": "SimPL", "version": "0.7.0"}')
+print obj["name"]  # SimPL
+
+# Convert SimPL object to JSON string
+let config = {"debug": true, "port": 8080}
+let json_str = to_json(config, true)  # pretty-printed
+write_file("config.json", json_str)
+```
+
 More examples are in the [`examples/`](examples/) directory:
 
 | File | Description |
@@ -368,6 +396,7 @@ More examples are in the [`examples/`](examples/) directory:
 | [`full_demo.simpl`](examples/full_demo.simpl) | Complete feature tour — every built-in function |
 | [`flavor_test.simpl`](examples/flavor_test.simpl) | All three syntax flavors in one program |
 | [`test_npm.simpl`](examples/test_npm.simpl) | NPM Bridge / JavaScript interop |
+| [`real_world.simpl`](examples/real_world.simpl) | Real API calls, JSON, dicts — production-ready demo |
 
 ---
 
@@ -481,7 +510,7 @@ end
 
 ### Built-in Functions
 
-SimPL includes 40+ built-in functions — no imports required:
+SimPL includes 50+ built-in functions — no imports required:
 
 | Category | Function | Signature | Description |
 |----------|----------|-----------|-------------|
@@ -528,6 +557,12 @@ SimPL includes 40+ built-in functions — no imports required:
 | | `sleep` | `sleep(seconds)` | Pause execution for N seconds |
 | | `env` | `env(name)` | Get environment variable |
 | | `shell` | `shell(cmd)` | Execute shell command, return output |
+| **HTTP** | `get` | `get(url, headers?)` | HTTP GET request, returns response object |
+| | `post` | `post(url, data, headers?)` | HTTP POST request, returns response object |
+| **JSON** | `parse_json` | `parse_json(string)` | Parse JSON string into SimPL dict/list |
+| | `to_json` | `to_json(obj, pretty?)` | Convert SimPL object to JSON string |
+| **Dictionaries** | `has_key` | `has_key(dict, key)` | Check if dict contains key |
+| | `remove` | `remove(dict, key)` | Remove a key from dict |
 | **Interop** | `js_eval` | `js_eval(code)` | Execute JavaScript via Node.js |
 
 > **Aliases:** `number` is an alias for `int`, and `string` is an alias for `str`.
@@ -602,7 +637,7 @@ SimPL has a dual-source package manager: community packages from the **SimPL-Lib
 
 ### SimPL-Libraries Registry
 
-Community packages are hosted as GitHub Issues in [SimPL-Libraries](https://github.com/thestrongestoftomorrow/SimPL-Libraries):
+Community packages are hosted as GitHub Issues in [SimPL-Libraries](https://github.com/TheStrongestOfTomorrow/SimPL-Libraries):
 
 ```bash
 # Install a community package
@@ -768,7 +803,7 @@ We welcome contributions! Here's how to get started:
 
 ### Adding a Community Package
 
-Packages live in the [SimPL-Libraries](https://github.com/thestrongestoftomorrow/SimPL-Libraries) repo as GitHub Issues. To publish a package:
+Packages live in the [SimPL-Libraries](https://github.com/TheStrongestOfTomorrow/SimPL-Libraries) repo as GitHub Issues. To publish a package:
 
 1. Open a new Issue in SimPL-Libraries with the **package name as the title**
 2. Add YAML frontmatter and a fenced code block:
@@ -794,7 +829,7 @@ end
 
 ### Reporting Bugs
 
-Open an Issue on the [SimPL repo](https://github.com/thestrongestoftomorrow/SimPL/issues) with:
+Open an Issue on the [SimPL repo](https://github.com/TheStrongestOfTomorrow/SimPL/issues) with:
 - What you expected to happen
 - What actually happened
 - The SimPL code that triggered the bug

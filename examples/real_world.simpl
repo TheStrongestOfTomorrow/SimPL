@@ -24,7 +24,7 @@ end
 print ""
 
 # ── 2. JSON: Create and save a config file ─────────────────────
-let config = {"name": "SimPL", "version": "0.6.0", "author": "TheStrongestOfTomorrow", "license": "MIT"}
+let config = {"name": "SimPL", "version": "0.7.0", "author": "TheStrongestOfTomorrow", "license": "MIT"}
 
 let json_str = to_json(config, true)
 print "Generated JSON config:"

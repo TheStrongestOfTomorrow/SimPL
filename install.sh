@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════
 # SimPL Quick Install Script
 # Works on: Linux, macOS, Termux (Android)
-# Usage:    curl -sSL https://raw.githubusercontent.com/thestrongestoftomorrow/SimPL/main/install.sh | bash
+# Usage:    curl -sSL https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.sh | bash
 #           OR:  bash install.sh
 # ═══════════════════════════════════════════════════════════════
 
@@ -92,7 +92,7 @@ if [ -d "$INSTALL_DIR" ]; then
 else
     echo ""
     echo -e "  Cloning SimPL repository..."
-    git clone -q https://github.com/thestrongestoftomorrow/SimPL.git "$INSTALL_DIR"
+    git clone -q https://github.com/TheStrongestOfTomorrow/SimPL.git "$INSTALL_DIR"
 fi
 
 echo -e "  ${GREEN}✓${RESET} SimPL downloaded to $INSTALL_DIR"

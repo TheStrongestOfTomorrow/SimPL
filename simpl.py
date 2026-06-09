@@ -33,7 +33,7 @@ from core.helper import SmartHelper, handle_error, get_helper
 from package_manager import install_package, uninstall_package, list_installed_packages
 
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 
 def load_source_file(filepath: str) -> str:
