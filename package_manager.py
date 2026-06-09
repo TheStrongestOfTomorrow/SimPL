@@ -5,6 +5,8 @@ Handles installation of packages from GitHub Issues in the SimPL-Libraries repo.
 Also supports the NPM Bridge: install JavaScript packages from the NPM registry
 and use them inside SimPL via the js_eval() built-in function.
 Supports mock mode for testing without network access.
+
+Uses curl via subprocess for all HTTP requests (no external Python deps required).
 """
 
 import os
@@ -12,7 +14,9 @@ import re
 import json
 import io
 import tarfile
-import requests
+import subprocess
+import shutil
+import tempfile
 from pathlib import Path
 
 # Try to import pyyaml, fall back to regex parser if not available
@@ -24,7 +28,103 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# YAML / Markdown helpers (unchanged)
+# HTTP helpers using curl (no external deps!)
+# ---------------------------------------------------------------------------
+
+class NetworkError(Exception):
+    """Exception for network/HTTP errors."""
+    def __init__(self, message, status_code=None):
+        self.status_code = status_code
+        super().__init__(message)
+
+
+def _curl_get(url, timeout=15, headers=None):
+    """
+    Perform an HTTP GET request using curl.
+
+    Args:
+        url: The URL to fetch.
+        timeout: Timeout in seconds.
+        headers: Optional dict of HTTP headers.
+
+    Returns:
+        dict with 'status_code' and 'text' keys.
+
+    Raises:
+        NetworkError: If curl fails or is not installed.
+    """
+    cmd = ['curl', '-sS', '-w', '\n%{http_code}', '--max-time', str(timeout)]
+
+    if headers:
+        for key, value in headers.items():
+            cmd.extend(['-H', f'{key}: {value}'])
+
+    cmd.append(url)
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5
+        )
+    except FileNotFoundError:
+        raise NetworkError(
+            "curl is not installed. Please install curl to use package management.\n"
+            "   On Ubuntu/Debian: sudo apt install curl\n"
+            "   On Termux: pkg install curl\n"
+            "   On macOS: brew install curl\n"
+            "   On Windows: curl is included by default"
+        )
+    except subprocess.TimeoutExpired:
+        raise NetworkError(f"Request to {url} timed out after {timeout}s")
+
+    output = result.stdout
+    # The last line is the HTTP status code (added by -w)
+    parts = output.rsplit('\n', 1)
+    if len(parts) == 2:
+        body, status_str = parts
+        try:
+            status_code = int(status_str.strip())
+        except ValueError:
+            body = output
+            status_code = 0
+    else:
+        body = output
+        status_code = 0
+
+    if status_code == 0:
+        raise NetworkError(f"Could not connect to {url}. Check your internet connection.")
+
+    return {'status_code': status_code, 'text': body}
+
+
+def _curl_download(url, output_path, timeout=30):
+    """
+    Download a file using curl.
+
+    Args:
+        url: The URL to download.
+        output_path: Path to save the file.
+        timeout: Timeout in seconds.
+
+    Raises:
+        NetworkError: If the download fails.
+    """
+    cmd = ['curl', '-sS', '-L', '--max-time', str(timeout), '-o', str(output_path), url]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
+        if result.returncode != 0:
+            raise NetworkError(f"Failed to download from {url}: {result.stderr.strip()}")
+    except FileNotFoundError:
+        raise NetworkError("curl is not installed. Please install curl to download packages.")
+    except subprocess.TimeoutExpired:
+        raise NetworkError(f"Download from {url} timed out after {timeout}s")
+
+
+# ---------------------------------------------------------------------------
+# YAML / Markdown helpers
 # ---------------------------------------------------------------------------
 
 def parse_yaml_frontmatter(text):
@@ -114,7 +214,7 @@ def get_mock_issue(package_name):
             'id': 99999,
             'title': 'super-math',
             'body': '''---
-name: super-math
+name: super_math
 version: 1.0.0
 dependencies: []
 author: SimPL Team
@@ -125,21 +225,21 @@ description: Enhanced math functions for SimPL
 # Super Math Library for SimPL
 # Provides enhanced mathematical operations
 
-let super-math.version = "1.0.0"
+let super_math_version = "1.0.0"
 
-function super-math.add(a, b)
+function super_math_add(a, b)
     return a + b
 end
 
-function super-math.subtract(a, b)
+function super_math_subtract(a, b)
     return a - b
 end
 
-function super-math.multiply(a, b)
+function super_math_multiply(a, b)
     return a * b
 end
 
-function super-math.divide(a, b)
+function super_math_divide(a, b)
     if b == 0 then
         print "Error: Division by zero"
         return 0
@@ -147,7 +247,7 @@ function super-math.divide(a, b)
     return a / b
 end
 
-function super-math.power(base, exp)
+function super_math_power(base, exp)
     let result = 1
     repeat exp times
         result = result * base
@@ -155,7 +255,7 @@ function super-math.power(base, exp)
     return result
 end
 
-function super-math.max(a, b)
+function super_math_max(a, b)
     if a > b then
         return a
     else
@@ -163,7 +263,7 @@ function super-math.max(a, b)
     end
 end
 
-function super-math.min(a, b)
+function super_math_min(a, b)
     if a < b then
         return a
     else
@@ -177,7 +277,7 @@ end
             'id': 99998,
             'title': 'string-utils',
             'body': '''---
-name: string-utils
+name: string_utils
 version: 0.5.0
 dependencies: []
 ---
@@ -185,17 +285,16 @@ dependencies: []
 ```simpl
 # String Utilities Library
 
-function string-utils.uppercase(str)
-    # Placeholder - would need actual implementation
-    return str
+function string_utils_uppercase(str)
+    return upper(str)
 end
 
-function string-utils.lowercase(str)
-    return str
+function string_utils_lowercase(str)
+    return lower(str)
 end
 
-function string-utils.length(str)
-    return 0
+function string_utils_length(str)
+    return len(str)
 end
 ```
 '''
@@ -211,29 +310,39 @@ end
 
 def _fetch_npm_metadata(package_name):
     """
-    Fetch package metadata from the NPM registry API.
+    Fetch package metadata from the NPM registry API using curl.
 
     Args:
         package_name: The NPM package name (without the npm: prefix).
 
     Returns:
-        dict with at least 'version', 'tarball', and 'main' keys.
+        dict with at least 'version', 'tarball', and 'main' keys, or None on 404.
 
     Raises:
-        requests.HTTPError: on network / HTTP errors (including 404).
+        NetworkError: on network / HTTP errors.
     """
     registry_url = f"https://registry.npmjs.org/{package_name}/latest"
-    response = requests.get(registry_url, timeout=15)
     
-    if response.status_code == 404:
-        return None  # Signal: package not found
+    try:
+        response = _curl_get(registry_url, timeout=15)
+    except NetworkError as e:
+        raise NetworkError(f"Could not reach the NPM registry: {e}")
     
-    response.raise_for_status()
-    data = response.json()
+    if response['status_code'] == 404:
+        return None  # Package not found
+    
+    if response['status_code'] != 200:
+        raise NetworkError(
+            f"NPM registry returned HTTP {response['status_code']} for '{package_name}'"
+        )
+    
+    try:
+        data = json.loads(response['text'])
+    except json.JSONDecodeError:
+        raise NetworkError(f"Invalid JSON response from NPM registry for '{package_name}'")
     
     version = data.get('version', '0.0.0')
     main_field = data.get('main', 'index.js')
-    # The tarball URL lives under dist.tarball
     tarball_url = data.get('dist', {}).get('tarball', '')
     
     return {
@@ -247,7 +356,7 @@ def _fetch_npm_metadata(package_name):
 
 def _download_and_extract_tarball(tarball_url, package_name, main_field='index.js'):
     """
-    Download an NPM .tgz tarball and extract the main JS file.
+    Download an NPM .tgz tarball using curl and extract the main JS file.
 
     NPM tarballs always contain a top-level ``package/`` directory.  The
     *main_field* is resolved relative to that directory.
@@ -258,66 +367,75 @@ def _download_and_extract_tarball(tarball_url, package_name, main_field='index.j
         main_field: The ``main`` entry from package.json (default ``index.js``).
 
     Returns:
-        str - The extracted JavaScript source code.
+        str - The extracted JavaScript source code, or None if not found.
     """
-    response = requests.get(tarball_url, timeout=30, stream=True)
-    response.raise_for_status()
-    
-    # Read the whole body into a BytesIO so tarfile can seek
-    tgz_bytes = io.BytesIO(response.content)
-    
+    # Download to a temp file using curl
+    with tempfile.NamedTemporaryFile(suffix='.tgz', delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        _curl_download(tarball_url, tmp_path, timeout=30)
+    except NetworkError:
+        # Clean up temp file
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
     js_code = None
-    
-    with tarfile.open(fileobj=tgz_bytes, mode='r:gz') as tar:
-        # NPM tarballs always have a 'package/' prefix
-        # Build the expected path inside the tarball
-        main_path_candidates = [
-            f'package/{main_field}',
-            f'package/index.js',       # fallback
-        ]
-        
-        # Also try to read package.json to find the real main field
-        pkg_json_member = None
-        for member in tar.getmembers():
-            if member.name == 'package/package.json':
-                pkg_json_member = member
-                break
-        
-        if pkg_json_member is not None:
-            try:
-                pkg_json_file = tar.extractfile(pkg_json_member)
-                if pkg_json_file is not None:
-                    pkg_json_data = json.loads(pkg_json_file.read().decode('utf-8'))
-                    real_main = pkg_json_data.get('main', main_field)
-                    # Prepend candidates with the real main from package.json
-                    if real_main != main_field:
-                        main_path_candidates.insert(0, f'package/{real_main}')
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                pass  # Fall through to existing candidates
-        
-        # Try each candidate path
-        for candidate in main_path_candidates:
+
+    try:
+        with tarfile.open(tmp_path, mode='r:gz') as tar:
+            # NPM tarballs always have a 'package/' prefix
+            main_path_candidates = [
+                f'package/{main_field}',
+                f'package/index.js',
+            ]
+
+            # Also try to read package.json to find the real main field
+            pkg_json_member = None
             for member in tar.getmembers():
-                if member.name == candidate:
-                    f = tar.extractfile(member)
-                    if f is not None:
-                        js_code = f.read().decode('utf-8', errors='replace')
-                        break
-            if js_code is not None:
-                break
-        
-        # If still not found, try to find *any* .js file at the root of package/
-        if js_code is None:
-            for member in tar.getmembers():
-                if (member.name.startswith('package/') and
-                        member.name.count('/') == 1 and
-                        member.name.endswith('.js') and
-                        member.isfile()):
-                    f = tar.extractfile(member)
-                    if f is not None:
-                        js_code = f.read().decode('utf-8', errors='replace')
-                        break
-    
+                if member.name == 'package/package.json':
+                    pkg_json_member = member
+                    break
+
+            if pkg_json_member is not None:
+                try:
+                    pkg_json_file = tar.extractfile(pkg_json_member)
+                    if pkg_json_file is not None:
+                        pkg_json_data = json.loads(pkg_json_file.read().decode('utf-8'))
+                        real_main = pkg_json_data.get('main', main_field)
+                        if real_main != main_field:
+                            main_path_candidates.insert(0, f'package/{real_main}')
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
+
+            # Try each candidate path
+            for candidate in main_path_candidates:
+                for member in tar.getmembers():
+                    if member.name == candidate:
+                        f = tar.extractfile(member)
+                        if f is not None:
+                            js_code = f.read().decode('utf-8', errors='replace')
+                            break
+                if js_code is not None:
+                    break
+
+            # If still not found, try to find *any* .js file at the root of package/
+            if js_code is None:
+                for member in tar.getmembers():
+                    if (member.name.startswith('package/') and
+                            member.name.count('/') == 1 and
+                            member.name.endswith('.js') and
+                            member.isfile()):
+                        f = tar.extractfile(member)
+                        if f is not None:
+                            js_code = f.read().decode('utf-8', errors='replace')
+                            break
+    finally:
+        # Clean up temp file
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
     return js_code
 
 
@@ -394,25 +512,25 @@ def install_npm_package(package_name):
     # Check if already installed
     lock_key = f'npm:{package_name}'
     if lock_key in installed_packages:
-        print(f"⚠️  npm:{package_name} is already installed "
+        print(f"npm:{package_name} is already installed "
               f"(v{installed_packages[lock_key].get('version', 'unknown')})")
-        print("   Run 'simpl uninstall npm:{}' first to reinstall.".format(package_name))
+        print(f"   Run 'simpl uninstall npm:{package_name}' first to reinstall.")
         return None
     
     # 1. Fetch NPM metadata
-    print(f"📦 Fetching metadata for '{package_name}' from NPM registry...")
+    print(f"Fetching metadata for '{package_name}' from NPM registry...")
     try:
         metadata = _fetch_npm_metadata(package_name)
-    except requests.RequestException as e:
-        print(f"🛑 Error: Could not reach the NPM registry.")
-        print(f"   💡 Tip: Check your internet connection and try again.")
+    except NetworkError as e:
+        print(f"Error: Could not reach the NPM registry.")
+        print(f"   Tip: Check your internet connection and try again.")
         print(f"   Details: {e}")
         return None
     
     if metadata is None:
         # 404 - package not found
-        print(f"🛑 Error: NPM package '{package_name}' not found.")
-        print(f"   💡 Tip: Check the spelling or search npmjs.com.")
+        print(f"Error: NPM package '{package_name}' not found.")
+        print(f"   Tip: Check the spelling or search npmjs.com.")
         return None
     
     version = metadata['version']
@@ -420,23 +538,23 @@ def install_npm_package(package_name):
     main_field = metadata.get('main', 'index.js')
     
     if not tarball_url:
-        print(f"🛑 Error: Could not find a tarball URL for '{package_name}'.")
-        print(f"   💡 Tip: The package may be empty or unpublished.")
+        print(f"Error: Could not find a tarball URL for '{package_name}'.")
+        print(f"   Tip: The package may be empty or unpublished.")
         return None
     
     # 2. Download and extract the tarball
-    print(f"📦 Downloading {package_name}@{version}...")
+    print(f"Downloading {package_name}@{version}...")
     try:
         js_code = _download_and_extract_tarball(tarball_url, package_name, main_field)
-    except requests.RequestException as e:
-        print(f"🛑 Error: Failed to download tarball for '{package_name}'.")
-        print(f"   💡 Tip: Check your internet connection and try again.")
+    except NetworkError as e:
+        print(f"Error: Failed to download tarball for '{package_name}'.")
+        print(f"   Tip: Check your internet connection and try again.")
         print(f"   Details: {e}")
         return None
     
     if js_code is None:
-        print(f"🛑 Error: Could not extract a main JS file from the tarball.")
-        print(f"   💡 Tip: The package may not contain a standard entry point.")
+        print(f"Error: Could not extract a main JS file from the tarball.")
+        print(f"   Tip: The package may not contain a standard entry point.")
         return None
     
     # 3. Save the JS file
@@ -466,7 +584,7 @@ def install_npm_package(package_name):
     with open(lock_file, 'w') as f:
         json.dump(installed_packages, f, indent=2)
     
-    print(f"✅ Installed npm:{package_name} (JS Bridge Active)")
+    print(f"Installed npm:{package_name} (JS Bridge Active)")
     
     return {
         'name': package_name,
@@ -480,7 +598,7 @@ def install_npm_package(package_name):
 # Original install_package (SimPL-Libraries via GitHub Issues)
 # ---------------------------------------------------------------------------
 
-def install_package(package_name, repo_owner="SimPL-Language", repo_name="SimPL-Libraries", mock=False):
+def install_package(package_name, repo_owner="thestrongestoftomorrow", repo_name="SimPL-Libraries", mock=False):
     """
     Install a package from GitHub Issues or the NPM registry.
 
@@ -503,8 +621,8 @@ def install_package(package_name, repo_owner="SimPL-Language", repo_name="SimPL-
     if package_name.startswith('npm:'):
         npm_name = package_name[4:]  # Strip the 'npm:' prefix
         if not npm_name:
-            print("🛑 Error: No package name specified after 'npm:'.")
-            print("   💡 Tip: Use 'simpl install npm:<package_name>' (e.g. npm:lodash).")
+            print("Error: No package name specified after 'npm:'.")
+            print("   Tip: Use 'simpl install npm:<package_name>' (e.g. npm:lodash).")
             return None
         return install_npm_package(npm_name)
     
@@ -529,8 +647,8 @@ def install_package(package_name, repo_owner="SimPL-Language", repo_name="SimPL-
     
     # Check if already installed
     if package_name in installed_packages:
-        print(f"⚠️  {package_name} is already installed (v{installed_packages[package_name].get('version', 'unknown')})")
-        print("   Run 'simpl uninstall {package_name}' first to reinstall.")
+        print(f"{package_name} is already installed (v{installed_packages[package_name].get('version', 'unknown')})")
+        print(f"   Run 'simpl uninstall {package_name}' first to reinstall.")
         return None
     
     # Get issue data
@@ -538,35 +656,62 @@ def install_package(package_name, repo_owner="SimPL-Language", repo_name="SimPL-
     
     if not mock:
         try:
-            # Search for open issues with matching title
-            search_url = f"https://api.github.com/search/issues"
-            params = {
-                'q': f'repo:{repo_owner}/{repo_name} type:issue state:open "{package_name}" in:title'
-            }
+            # Search for open issues with matching title using curl
+            search_url = (
+                f"https://api.github.com/search/issues"
+                f"?q=repo%3A{repo_owner}%2F{repo_name}+type%3Aissue+state%3Aopen"
+                f"+%22{package_name}%22+in%3Atitle"
+            )
             
-            response = requests.get(search_url, params=params, timeout=10)
-            response.raise_for_status()
+            response = _curl_get(search_url, timeout=10)
             
-            data = response.json()
-            
-            if data.get('total_count', 0) == 0:
-                print(f"❌ No package named '{package_name}' found in {repo_owner}/{repo_name}")
-                print("   Trying mock mode...")
+            if response['status_code'] == 422:
+                # GitHub API validation error - likely a bad query
+                print(f"Warning: GitHub API returned 422. Falling back to mock mode...")
                 issue_data = get_mock_issue(package_name)
                 if not issue_data:
-                    print(f"   No mock data available for '{package_name}' either.")
+                    print(f"   No mock data available for '{package_name}'.")
                     return None
-                mock = True  # Switch to mock mode
+                mock = True
+            elif response['status_code'] != 200:
+                print(f"Warning: Could not connect to GitHub API (HTTP {response['status_code']}).")
+                print("   Falling back to mock mode...")
+                issue_data = get_mock_issue(package_name)
+                if not issue_data:
+                    print(f"   No mock data available for '{package_name}'.")
+                    return None
+                mock = True
             else:
-                # Get the first matching issue
-                issue = data['items'][0]
-                issue_data = {
-                    'id': issue['id'],
-                    'title': issue['title'],
-                    'body': issue['body']
-                }
-        except requests.RequestException as e:
-            print(f"⚠️  Could not connect to GitHub API: {e}")
+                try:
+                    data = json.loads(response['text'])
+                except json.JSONDecodeError:
+                    print("Warning: Invalid response from GitHub API. Falling back to mock mode...")
+                    issue_data = get_mock_issue(package_name)
+                    if not issue_data:
+                        print(f"   No mock data available for '{package_name}'.")
+                        return None
+                    mock = True
+                    data = None
+                
+                if data is not None:
+                    if data.get('total_count', 0) == 0:
+                        print(f"No package named '{package_name}' found in {repo_owner}/{repo_name}")
+                        print("   Trying mock mode...")
+                        issue_data = get_mock_issue(package_name)
+                        if not issue_data:
+                            print(f"   No mock data available for '{package_name}' either.")
+                            return None
+                        mock = True
+                    else:
+                        # Get the first matching issue
+                        issue = data['items'][0]
+                        issue_data = {
+                            'id': issue['id'],
+                            'title': issue['title'],
+                            'body': issue['body']
+                        }
+        except NetworkError as e:
+            print(f"Warning: Could not connect to GitHub API: {e}")
             print("   Falling back to mock mode...")
             issue_data = get_mock_issue(package_name)
             if not issue_data:
@@ -576,11 +721,11 @@ def install_package(package_name, repo_owner="SimPL-Language", repo_name="SimPL-
     else:
         issue_data = get_mock_issue(package_name)
         if not issue_data:
-            print(f"❌ No mock data available for '{package_name}'.")
+            print(f"No mock data available for '{package_name}'.")
             return None
     
     if mock:
-        print("📦 Using mock data for testing")
+        print("Using mock data for testing")
     
     # Parse the issue body
     body = issue_data['body']
@@ -598,7 +743,7 @@ def install_package(package_name, repo_owner="SimPL-Language", repo_name="SimPL-
     code = extract_code_block(body)
     
     if not code:
-        print(f"❌ No SimPL code block found in the issue for '{package_name}'")
+        print(f"No SimPL code block found in the issue for '{package_name}'")
         return None
     
     # Create package directory and save code
@@ -622,13 +767,13 @@ def install_package(package_name, repo_owner="SimPL-Language", repo_name="SimPL-
     
     # Install dependencies
     if dependencies:
-        print(f"📦 Installing dependencies for {package_name}...")
+        print(f"Installing dependencies for {package_name}...")
         for dep in dependencies:
             dep_name = dep if isinstance(dep, str) else dep.get('name', dep)
             if dep_name and dep_name not in installed_packages:
                 install_package(dep_name, repo_owner, repo_name, mock)
     
-    print(f"✅ Installed {package_name}@{version}")
+    print(f"Installed {package_name}@{version}")
     if mock:
         print("   (Mock mode - connect to GitHub for real packages)")
     
@@ -675,12 +820,11 @@ def uninstall_package(package_name):
             pass
     
     if lock_key not in installed_packages:
-        print(f"❌ Package '{package_name}' is not installed")
+        print(f"Package '{package_name}' is not installed")
         return False
     
     # Remove package directory
     if package_dir.exists():
-        import shutil
         shutil.rmtree(package_dir)
     
     # Update lock file
@@ -689,7 +833,7 @@ def uninstall_package(package_name):
     with open(lock_file, 'w') as f:
         json.dump(installed_packages, f, indent=2)
     
-    print(f"✅ Uninstalled {package_name}")
+    print(f"Uninstalled {package_name}")
     return True
 
 

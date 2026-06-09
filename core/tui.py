@@ -364,7 +364,7 @@ def action_show_reference():
       return "Hello, " + name + "!"
   end
 
-{C.colorize("BUILT-IN FUNCTIONS (30+)", C.BOLD + C.BRIGHT_CYAN)}
+{C.colorize("BUILT-IN FUNCTIONS (40+)", C.BOLD + C.BRIGHT_CYAN)}
   Math:     abs, min, max, round, floor, ceil, sqrt, pow, random
   Strings:  str, upper, lower, trim, split, join, replace, len
   Lists:    push, pop, range, len, reverse, sort, contains
@@ -466,7 +466,7 @@ and games.
 
 {C.colorize("Features:", C.BOLD)}
   - 3 Syntax Flavors: Standard, C/JS, Python
-  - 30+ Built-in Functions
+  - 40+ Built-in Functions
   - NPM Bridge (JavaScript interop)
   - Community Package Manager
   - Smart Error Messages

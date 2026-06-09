@@ -877,7 +877,7 @@ class Interpreter:
         items = []
         for item in lst:
             if isinstance(item, str):
-                items.append(item)
+                items.append(f'"{item}"')
             elif isinstance(item, bool):
                 items.append('true' if item else 'false')
             elif isinstance(item, list):

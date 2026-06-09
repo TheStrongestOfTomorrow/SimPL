@@ -527,14 +527,14 @@ class Lexer:
             while self.current_char() is not None and self.current_char() != '\n':
                 self.advance()
 
-    def read_string(self) -> Token:
-        """Read a string literal enclosed in double quotes."""
+    def read_string(self, quote_char='"') -> Token:
+        """Read a string literal enclosed in double or single quotes."""
         start_line = self.line
         start_column = self.column
         self.advance()  # Skip opening quote
 
         value = ""
-        while self.current_char() is not None and self.current_char() != '"':
+        while self.current_char() is not None and self.current_char() != quote_char:
             if self.current_char() == '\\':
                 self.advance()  # Skip backslash
                 escape_char = self.current_char()
@@ -544,6 +544,8 @@ class Lexer:
                     value += '\t'
                 elif escape_char == '"':
                     value += '"'
+                elif escape_char == "'":
+                    value += "'"
                 elif escape_char == '\\':
                     value += '\\'
                 elif escape_char == '{':
@@ -648,9 +650,12 @@ class Lexer:
                 self.advance()
                 continue
 
-            # String literal
+            # String literal (double or single quotes)
             if self.current_char() == '"':
-                self.tokens.append(self.read_string())
+                self.tokens.append(self.read_string('"'))
+                continue
+            if self.current_char() == "'":
+                self.tokens.append(self.read_string("'"))
                 continue
 
             # Number literal
