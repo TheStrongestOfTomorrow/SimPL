@@ -17,9 +17,14 @@ Supports:
 - Function definitions with parameters and return
 - Function calls (built-in and user-defined)
 - List literals [1, 2, 3] and indexing arr[0]
+- Dict literals {"key": "value"} and indexing dict["key"]
+- Index assignment arr[i] = val
+- Boolean literals (true, false)
+- Try/catch blocks
 - Input function
 - String concatenation with +
 - NPM Bridge via js_eval()
+- Many built-in functions for I/O, string, list, and system operations
 """
 
 from typing import Any, Dict, List, Optional, Union
@@ -75,6 +80,12 @@ class NumberNode:
 
 
 @dataclass
+class BooleanNode:
+    """AST node for boolean literals: true, false."""
+    value: bool
+
+
+@dataclass
 class StringNode:
     """AST node for string literals."""
     value: str
@@ -84,6 +95,12 @@ class StringNode:
 class ListNode:
     """AST node for list literals: [1, 2, 3]"""
     elements: List[Any]
+
+
+@dataclass
+class DictNode:
+    """AST node for dict literals: {"key": "value"}"""
+    pairs: List[Any]  # List of (key_node, value_node) tuples
 
 
 @dataclass
@@ -198,6 +215,13 @@ class ContinueNode:
 
 
 @dataclass
+class TryCatchNode:
+    """AST node for try/catch blocks: try ... catch ... end"""
+    try_block: List[Any]
+    catch_block: List[Any]
+
+
+@dataclass
 class ProgramNode:
     """AST node for the entire program."""
     statements: List[Any]
@@ -294,6 +318,8 @@ class Parser:
             return ContinueNode()
         elif token.type == TokenType.INPUT:
             return self.parse_input()
+        elif token.type == TokenType.TRY:
+            return self.parse_try_catch()
         elif token.type == TokenType.IDENTIFIER:
             return self.parse_assignment_or_call()
         else:
@@ -318,8 +344,9 @@ class Parser:
                 self.advance()
                 self.skip_newlines()
                 value = self.parse_expression()
-                # Represent as a special LetNode with name "__setindex__"
-                return LetNode(f"__setindex__:{name}", IndexNode(IdentifierNode(name), index))
+                # Store both index and RHS value in the LetNode
+                # Use ListNode to hold [index, value] so interpreter can evaluate both
+                return LetNode(f"__setindex__:{name}", ListNode([index, value]))
             # Otherwise it's just an indexed expression used as a statement
             raise ParseError("Indexed expression used as statement without assignment", name_token)
 
@@ -327,7 +354,10 @@ class Parser:
         if self.current_token() and self.current_token().type == TokenType.LPAREN:
             args = self._parse_function_args()
             call_node = FunctionCallNode(name, args)
-            return PrintNode(call_node)
+            # Return FunctionCallNode directly — don't wrap in PrintNode
+            # The interpreter will execute the function (which handles
+            # built-in functions that modify state like push())
+            return call_node
 
         # Check for assignment: name = expression
         if self.current_token() and self.current_token().type == TokenType.EQUALS:
@@ -490,14 +520,27 @@ class Parser:
         value = self.parse_expression()
         return ReturnNode(value)
 
+    def parse_try_catch(self) -> TryCatchNode:
+        """Parse: try ... catch ... end"""
+        self.advance()  # Skip 'try'
+        self.skip_newlines()
+        try_block = self.parse_block()
+        self.skip_newlines()
+        self.expect(TokenType.CATCH, "Expected 'catch' after try block")
+        self.skip_newlines()
+        catch_block = self.parse_block()
+        self.skip_newlines()
+        self.expect(TokenType.END, "Expected 'end' to close try/catch")
+        return TryCatchNode(try_block, catch_block)
+
     def parse_block(self) -> List[Any]:
-        """Parse a block of statements until 'end', 'else', 'elif', or EOF."""
+        """Parse a block of statements until 'end', 'else', 'elif', 'catch', or EOF."""
         statements = []
         while self.current_token().type not in (
-            TokenType.END, TokenType.ELSE, TokenType.ELIF, TokenType.EOF
+            TokenType.END, TokenType.ELSE, TokenType.ELIF, TokenType.CATCH, TokenType.EOF
         ):
             self.skip_newlines()
-            if self.current_token().type in (TokenType.END, TokenType.ELSE, TokenType.ELIF, TokenType.EOF):
+            if self.current_token().type in (TokenType.END, TokenType.ELSE, TokenType.ELIF, TokenType.CATCH, TokenType.EOF):
                 break
             stmt = self.parse_statement()
             if stmt is not None:
@@ -633,12 +676,19 @@ class Parser:
                 value = int(value)
             return NumberNode(value)
 
+        if token.type == TokenType.BOOLEAN:
+            self.advance()
+            return BooleanNode(token.value == 'true')
+
         if token.type == TokenType.STRING:
             self.advance()
             return StringNode(token.value)
 
         if token.type == TokenType.LBRACKET:
             return self.parse_list_literal()
+
+        if token.type == TokenType.LBRACE:
+            return self.parse_dict_literal()
 
         if token.type == TokenType.IDENTIFIER:
             self.advance()
@@ -685,6 +735,38 @@ class Parser:
 
         self.expect(TokenType.RBRACKET, "Expected ']' after list elements")
         return ListNode(elements)
+
+    def parse_dict_literal(self) -> DictNode:
+        """Parse a dict literal: {"key": "value", "key2": 42}"""
+        self.advance()  # Skip {
+        pairs = []
+        self.skip_newlines()
+
+        if self.current_token().type == TokenType.RBRACE:
+            self.advance()
+            return DictNode(pairs)
+
+        # Parse first pair
+        key = self.parse_expression()
+        self.expect(TokenType.COLON, "Expected ':' after dict key")
+        self.skip_newlines()
+        value = self.parse_expression()
+        pairs.append((key, value))
+        self.skip_newlines()
+
+        # Parse remaining pairs
+        while self.current_token().type == TokenType.COMMA:
+            self.advance()
+            self.skip_newlines()
+            key = self.parse_expression()
+            self.expect(TokenType.COLON, "Expected ':' after dict key")
+            self.skip_newlines()
+            value = self.parse_expression()
+            pairs.append((key, value))
+            self.skip_newlines()
+
+        self.expect(TokenType.RBRACE, "Expected '}' after dict entries")
+        return DictNode(pairs)
 
 
 # ======================================================================
@@ -747,20 +829,30 @@ class Interpreter:
             raise BreakSignal()
         elif isinstance(node, ContinueNode):
             raise ContinueSignal()
+        elif isinstance(node, TryCatchNode):
+            self.execute_try_catch(node)
+        elif isinstance(node, FunctionCallNode):
+            # Bare function call as a statement (e.g., push(list, val))
+            self.evaluate_function_call(node)
         else:
             raise RuntimeError(f"Unknown statement type: {type(node).__name__}")
 
     def execute_let(self, node: LetNode):
         """Execute a let statement."""
-        # Check for special __setindex__ pattern
+        # Check for special __setindex__ pattern (index assignment: arr[i] = val)
         if node.name.startswith("__setindex__:"):
             var_name = node.name.split(":", 1)[1]
             if var_name not in self.variables:
                 raise RuntimeError(f"Undefined variable: {var_name}")
-            # The value is the IndexNode, we need to get the index
-            # and the actual value to set
-            # This is a simplified version: we reconstruct from the AST
-            raise RuntimeError("Index assignment not yet fully supported - use list functions")
+            # node.value is a ListNode containing [index, value] AST nodes
+            pair = self.evaluate(node.value)
+            index_val = pair[0]
+            value_val = pair[1]
+            try:
+                self.variables[var_name][index_val] = value_val
+            except (IndexError, KeyError, TypeError) as e:
+                raise RuntimeError(f"Index error: cannot set [{index_val}] on {var_name}")
+            return
         value = self.evaluate(node.value)
         self.variables[node.name] = value
 
@@ -776,8 +868,7 @@ class Interpreter:
         elif isinstance(value, list):
             self.output.append(self._format_list(value))
         elif isinstance(value, dict):
-            import json
-            self.output.append(json.dumps(value))
+            self.output.append(self._format_dict(value))
         else:
             self.output.append(str(value))
 
@@ -791,9 +882,16 @@ class Interpreter:
                 items.append('true' if item else 'false')
             elif isinstance(item, list):
                 items.append(self._format_list(item))
+            elif isinstance(item, dict):
+                items.append(self._format_dict(item))
             else:
                 items.append(str(item))
         return '[' + ', '.join(items) + ']'
+
+    def _format_dict(self, d: dict) -> str:
+        """Format a dict for printing."""
+        import json
+        return json.dumps(d, default=str)
 
     def execute_if(self, node: IfNode):
         """Execute an if/elif/else statement."""
@@ -849,6 +947,31 @@ class Interpreter:
             except ContinueSignal:
                 continue
 
+    def execute_repeat(self, node: RepeatNode):
+        """Execute a repeat loop with break/continue."""
+        count = int(self.evaluate(node.count))
+        for _ in range(count):
+            try:
+                for stmt in node.body:
+                    self.execute(stmt)
+            except BreakSignal:
+                break
+            except ContinueSignal:
+                continue
+
+    def execute_try_catch(self, node: TryCatchNode):
+        """Execute a try/catch block."""
+        try:
+            for stmt in node.try_block:
+                self.execute(stmt)
+        except (BreakSignal, ContinueSignal, ReturnSignal):
+            raise  # Re-raise control flow signals
+        except Exception as e:
+            # Store the error message in a special variable
+            self.variables['__error__'] = str(e)
+            for stmt in node.catch_block:
+                self.execute(stmt)
+
     # ------------------------------------------------------------------
     # Expression evaluation
     # ------------------------------------------------------------------
@@ -858,11 +981,22 @@ class Interpreter:
         if isinstance(node, NumberNode):
             return node.value
 
+        if isinstance(node, BooleanNode):
+            return node.value
+
         if isinstance(node, StringNode):
             return node.value
 
         if isinstance(node, ListNode):
             return [self.evaluate(el) for el in node.elements]
+
+        if isinstance(node, DictNode):
+            result = {}
+            for key_node, value_node in node.pairs:
+                key = self.evaluate(key_node)
+                value = self.evaluate(value_node)
+                result[key] = value
+            return result
 
         if isinstance(node, IdentifierNode):
             if node.name in self._functions:
@@ -986,6 +1120,23 @@ class Interpreter:
             'sqrt': self._builtin_sqrt,
             'pow': self._builtin_pow,
             'random': self._builtin_random,
+            # New built-in functions
+            'read_file': self._builtin_read_file,
+            'write_file': self._builtin_write_file,
+            'append_file': self._builtin_append_file,
+            'reverse': self._builtin_reverse,
+            'sort': self._builtin_sort,
+            'contains': self._builtin_contains,
+            'sleep': self._builtin_sleep,
+            'time': self._builtin_time,
+            'env': self._builtin_env,
+            'shell': self._builtin_shell,
+            'bool': self._builtin_bool,
+            'starts_with': self._builtin_starts_with,
+            'ends_with': self._builtin_ends_with,
+            'slice': self._builtin_slice,
+            'index_of': self._builtin_index_of,
+            'to_number': self._builtin_to_number,
         }
 
         # Method calls (__method__:name pattern)
@@ -1002,6 +1153,12 @@ class Interpreter:
                 'join': self._builtin_join,
                 'keys': self._builtin_keys,
                 'values': self._builtin_values,
+                'contains': self._builtin_contains,
+                'reverse': self._builtin_reverse,
+                'sort': self._builtin_sort,
+                'starts_with': self._builtin_starts_with,
+                'ends_with': self._builtin_ends_with,
+                'index_of': self._builtin_index_of,
             }
             if method_name in method_map:
                 return method_map[method_name](args)
@@ -1074,6 +1231,8 @@ class Interpreter:
             return 'true' if v else 'false'
         if isinstance(v, list):
             return self._format_list(v)
+        if isinstance(v, dict):
+            return self._format_dict(v)
         return str(v)
 
     def _builtin_int(self, args):
@@ -1247,6 +1406,167 @@ class Interpreter:
             return _random.randint(int(args[0]), int(args[1]))
         raise RuntimeError("random() expects 0-2 arguments")
 
+    # ------------------------------------------------------------------
+    # New built-in functions
+    # ------------------------------------------------------------------
+
+    def _builtin_read_file(self, args):
+        """read_file(path) - reads a file and returns its content as string."""
+        if len(args) != 1:
+            raise RuntimeError("read_file() expects 1 argument")
+        try:
+            with open(args[0], 'r') as f:
+                return f.read()
+        except FileNotFoundError:
+            raise RuntimeError(f"File not found: {args[0]}")
+        except IOError as e:
+            raise RuntimeError(f"Error reading file: {e}")
+
+    def _builtin_write_file(self, args):
+        """write_file(path, content) - writes content to a file."""
+        if len(args) != 2:
+            raise RuntimeError("write_file() expects 2 arguments: write_file(path, content)")
+        try:
+            with open(args[0], 'w') as f:
+                f.write(str(args[1]))
+            return True
+        except IOError as e:
+            raise RuntimeError(f"Error writing file: {e}")
+
+    def _builtin_append_file(self, args):
+        """append_file(path, content) - appends content to a file."""
+        if len(args) != 2:
+            raise RuntimeError("append_file() expects 2 arguments: append_file(path, content)")
+        try:
+            with open(args[0], 'a') as f:
+                f.write(str(args[1]))
+            return True
+        except IOError as e:
+            raise RuntimeError(f"Error appending to file: {e}")
+
+    def _builtin_reverse(self, args):
+        """reverse(list_or_string) - reverses a list or string."""
+        if len(args) != 1:
+            raise RuntimeError("reverse() expects 1 argument")
+        if isinstance(args[0], list):
+            return list(reversed(args[0]))
+        elif isinstance(args[0], str):
+            return args[0][::-1]
+        raise RuntimeError("reverse() argument must be a list or string")
+
+    def _builtin_sort(self, args):
+        """sort(list) - sorts a list."""
+        if len(args) != 1:
+            raise RuntimeError("sort() expects 1 argument")
+        if isinstance(args[0], list):
+            try:
+                return sorted(args[0])
+            except TypeError:
+                raise RuntimeError("sort() list elements must be comparable")
+        raise RuntimeError("sort() argument must be a list")
+
+    def _builtin_contains(self, args):
+        """contains(list_or_string, item) - checks if item exists."""
+        if len(args) != 2:
+            raise RuntimeError("contains() expects 2 arguments: contains(collection, item)")
+        return args[1] in args[0]
+
+    def _builtin_sleep(self, args):
+        """sleep(seconds) - pauses execution."""
+        if len(args) != 1:
+            raise RuntimeError("sleep() expects 1 argument")
+        import time as _time
+        _time.sleep(float(args[0]))
+        return None
+
+    def _builtin_time(self, args):
+        """time() - returns current unix timestamp."""
+        if len(args) != 0:
+            raise RuntimeError("time() expects 0 arguments")
+        import time as _time
+        return _time.time()
+
+    def _builtin_env(self, args):
+        """env(name) - gets environment variable."""
+        if len(args) != 1:
+            raise RuntimeError("env() expects 1 argument")
+        import os
+        return os.environ.get(args[0], '')
+
+    def _builtin_shell(self, args):
+        """shell(command) - runs a shell command and returns output."""
+        if len(args) != 1:
+            raise RuntimeError("shell() expects 1 argument")
+        import subprocess
+        try:
+            result = subprocess.run(
+                args[0], shell=True, capture_output=True, text=True, timeout=30
+            )
+            return result.stdout
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("shell() command timed out")
+        except Exception as e:
+            raise RuntimeError(f"shell() error: {e}")
+
+    def _builtin_bool(self, args):
+        """bool(value) - converts to boolean."""
+        if len(args) != 1:
+            raise RuntimeError("bool() expects 1 argument")
+        return bool(args[0])
+
+    def _builtin_starts_with(self, args):
+        """starts_with(s, prefix) - checks if string starts with prefix."""
+        if len(args) != 2:
+            raise RuntimeError("starts_with() expects 2 arguments: starts_with(string, prefix)")
+        return str(args[0]).startswith(str(args[1]))
+
+    def _builtin_ends_with(self, args):
+        """ends_with(s, suffix) - checks if string ends with suffix."""
+        if len(args) != 2:
+            raise RuntimeError("ends_with() expects 2 arguments: ends_with(string, suffix)")
+        return str(args[0]).endswith(str(args[1]))
+
+    def _builtin_slice(self, args):
+        """slice(list_or_string, start, end) - slices a list or string."""
+        if len(args) < 2 or len(args) > 3:
+            raise RuntimeError("slice() expects 2-3 arguments: slice(collection, start, end)")
+        obj = args[0]
+        start = int(args[1])
+        end = int(args[2]) if len(args) == 3 else len(obj)
+        try:
+            return obj[start:end]
+        except (TypeError, IndexError):
+            raise RuntimeError("slice() cannot slice the given collection")
+
+    def _builtin_index_of(self, args):
+        """index_of(list_or_string, item) - finds index of item."""
+        if len(args) != 2:
+            raise RuntimeError("index_of() expects 2 arguments: index_of(collection, item)")
+        try:
+            return args[0].index(args[1])
+        except ValueError:
+            return -1
+        except AttributeError:
+            raise RuntimeError("index_of() argument must be a list or string")
+
+    def _builtin_to_number(self, args):
+        """to_number(s) - converts string to number (int or float)."""
+        if len(args) != 1:
+            raise RuntimeError("to_number() expects 1 argument")
+        val = args[0]
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return val
+        try:
+            # Try int first, then float
+            int_val = int(val)
+            return int_val
+        except (ValueError, TypeError):
+            pass
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            raise RuntimeError(f"Cannot convert to number: {val!r}")
+
 
 # ======================================================================
 # Convenience
@@ -1255,6 +1575,15 @@ class Interpreter:
 def parse_and_execute(source: str) -> List[str]:
     """
     Convenience function to parse and execute SimPL source code.
+
+    Creates a Lexer, Parser, and Interpreter pipeline and returns
+    the output lines from execution.
+
+    Args:
+        source: The SimPL source code string.
+
+    Returns:
+        List of output strings from the program execution.
     """
     lexer = Lexer(source)
     tokens = lexer.tokenize()
@@ -1270,6 +1599,26 @@ let x = 10
 let y = 20
 print "Hello, World!"
 print x + y
+
+# Test boolean
+let flag = true
+print flag
+
+# Test dict
+let d = {"name": "SimPL", "version": 1}
+print d
+
+# Test list index assignment
+let arr = [1, 2, 3]
+arr[0] = 99
+print arr
+
+# Test try/catch
+try
+    let z = 1 / 0
+catch
+    print "Caught an error!"
+end
 '''
     output = parse_and_execute(test_code)
     print("Output:")

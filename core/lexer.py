@@ -15,8 +15,9 @@ Syntax Flavor Packs:
 
 Supported token types:
 - Keywords: let, print, if, then, else, end, do, while, for, in,
-            repeat, times, function, return, break, continue, elif, input
-- Literals: numbers, strings, identifiers
+            repeat, times, function, return, break, continue, elif, input,
+            try, catch
+- Literals: numbers, strings, booleans (true/false), identifiers
 - Operators: +, -, *, /, %, ==, !=, <, >, <=, >=, and, or, not
 - Delimiters: (, ), [, ], {, }, comma, colon, semicolon, dot
 - Comments: # line, // line, /* block */
@@ -49,10 +50,13 @@ class TokenType(Enum):
     BREAK = auto()
     CONTINUE = auto()
     INPUT = auto()
+    TRY = auto()
+    CATCH = auto()
 
     # Literals
     NUMBER = auto()
     STRING = auto()
+    BOOLEAN = auto()
     IDENTIFIER = auto()
 
     # Operators
@@ -121,11 +125,13 @@ KEYWORDS = {
     'break': TokenType.BREAK,
     'continue': TokenType.CONTINUE,
     'input': TokenType.INPUT,
+    'try': TokenType.TRY,
+    'catch': TokenType.CATCH,
     'and': TokenType.AND,
     'or': TokenType.OR,
     'not': TokenType.NOT,
-    'true': TokenType.NUMBER,   # handled specially
-    'false': TokenType.NUMBER,  # handled specially
+    'true': TokenType.BOOLEAN,
+    'false': TokenType.BOOLEAN,
 }
 
 
@@ -176,6 +182,7 @@ class FlavorNormalizer:
     _BLOCK_KEYWORDS_LOOP = {'while', 'for', 'repeat'}
     _BLOCK_KEYWORDS_FUNC = {'function'}
     _BLOCK_KEYWORDS_ELSE = {'else'}
+    _BLOCK_KEYWORDS_TRY = {'try'}
 
     def __init__(self):
         self._flavor_stack = []  # Track which flavor opened each block: 'c', 'python', 'standard'
@@ -388,6 +395,8 @@ class FlavorNormalizer:
             return line_content + ' do'
         elif first_word in self._BLOCK_KEYWORDS_FUNC:
             return line_content + ' then'  # function bodies use then/end
+        elif first_word in self._BLOCK_KEYWORDS_TRY:
+            return line_content + ' then'  # try blocks use then/end
         else:
             # Default to then for unknown patterns
             return line_content + ' then'
@@ -589,11 +598,11 @@ class Lexer:
         lower_value = value.lower()
         token_type = KEYWORDS.get(lower_value, TokenType.IDENTIFIER)
 
-        # Special handling for true/false
+        # Special handling for true/false as BOOLEAN tokens
         if lower_value == 'true':
-            return Token(TokenType.NUMBER, '1', start_line, start_column)
+            return Token(TokenType.BOOLEAN, 'true', start_line, start_column)
         elif lower_value == 'false':
-            return Token(TokenType.NUMBER, '0', start_line, start_column)
+            return Token(TokenType.BOOLEAN, 'false', start_line, start_column)
         elif lower_value == 'elif':
             return Token(TokenType.ELIF, value, start_line, start_column)
 
@@ -766,6 +775,30 @@ if z > 25:
 '''
     print("\n--- Python Style ---")
     lexer = Lexer(python_style)
+    for tok in lexer.tokenize():
+        print(f"  {tok}")
+
+    # Boolean tokens
+    bool_test = '''
+let a = true
+let b = false
+print a and b
+'''
+    print("\n--- Boolean Tokens ---")
+    lexer = Lexer(bool_test)
+    for tok in lexer.tokenize():
+        print(f"  {tok}")
+
+    # Try/Catch
+    try_catch = '''
+try
+    let x = 1 / 0
+catch
+    print "Error!"
+end
+'''
+    print("\n--- Try/Catch ---")
+    lexer = Lexer(try_catch)
     for tok in lexer.tokenize():
         print(f"  {tok}")
 
