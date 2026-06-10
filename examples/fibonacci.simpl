@@ -1,0 +1,12 @@
+# Fibonacci sequence in SimPL
+func fib(n) {
+  if n <= 1 {
+    return n
+  }
+  return fib(n - 1) + fib(n - 2)
+}
+
+say "Fibonacci sequence:"
+for i in range(10) {
+  say "fib(" + str(i) + ") = " + str(fib(i))
+}

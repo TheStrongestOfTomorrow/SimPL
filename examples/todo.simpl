@@ -1,0 +1,34 @@
+# Simple todo list app in SimPL
+set todos = []
+
+func add_todo(text) {
+  set todos = push(todos, {text: text, done: false})
+  say "Added: " + text
+}
+
+func list_todos() {
+  say "=== Todo List ==="
+  for i in range(len(todos)) {
+    set todo = todos[i]
+    set status = "[ ]"
+    if todo.done {
+      set status = "[x]"
+    }
+    say status + " " + str(i) + ". " + todo.text
+  }
+}
+
+func complete_todo(index) {
+  if index < len(todos) {
+    set todos[index].done = true
+    say "Completed: " + todos[index].text
+  }
+}
+
+add_todo("Learn SimPL")
+add_todo("Build something cool")
+add_todo("Share with friends")
+list_todos()
+say ""
+complete_todo(0)
+list_todos()

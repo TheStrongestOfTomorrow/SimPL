@@ -1,167 +1,265 @@
 #!/usr/bin/env bash
-# ═══════════════════════════════════════════════════════════════
-# SimPL Quick Install Script
-# Works on: Linux, macOS, Termux (Android)
-# Usage:    curl -sSL https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.sh | bash
-#           OR:  bash install.sh
-# ═══════════════════════════════════════════════════════════════
-
+#
+# SimPL Installer - GitHub Only
+# Install: curl -sSL https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.sh | bash
+#
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
 BOLD='\033[1m'
-DIM='\033[2m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
 RESET='\033[0m'
 
-echo ""
-echo -e "${CYAN}═══════════════════════════════════════════════════${RESET}"
-echo -e "${CYAN}  ${BOLD}SimPL - Quick Installer${RESET}"
-echo -e "${CYAN}═══════════════════════════════════════════════════${RESET}"
-echo ""
+REPO="TheStrongestOfTomorrow/SimPL"
+GITHUB_API="https://api.github.com/repos/$REPO"
+INSTALL_DIR="$HOME/.simpl"
+BIN_DIR="$HOME/.local/bin"
 
-# ── Detect platform ──────────────────────────────────────────
-detect_platform() {
-    local uname_out="$(uname -s)"
-    case "${uname_out}" in
-        Linux*)
-            if [ -d "/data/data/com.termux" ] || echo "$PREFIX" | grep -qi "termux"; then
-                echo "termux"
-            else
-                echo "linux"
-            fi
-            ;;
-        Darwin*)  echo "macos" ;;
-        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
-        *)        echo "unknown" ;;
-    esac
+print_banner() {
+    echo -e "${CYAN}"
+    echo "  ____                  _ _____           "
+    echo " / ___|  ___  _ __  __| |_   _| __ __ _  ___ "
+    echo " \\___ \\ / _ \\| '_ \\/ _\` | | || '__/ _\` |/ _ \\"
+    echo "  ___) | (_) | | | (_| | | || | | (_| |  __/"
+    echo " |____/ \\___/|_|  \\__,_| |_||_|  \\__,_|\\___|"
+    echo -e "                    ${BOLD}v1.0.0${RESET}"
+    echo ""
 }
 
-PLATFORM=$(detect_platform)
-echo -e "  Platform: ${BOLD}${PLATFORM}${RESET}"
+info() { echo -e "${GREEN}[✓]${RESET} $1"; }
+warn() { echo -e "${YELLOW}[!]${RESET} $1"; }
+error() { echo -e "${RED}[✖]${RESET} $1"; }
 
-# ── Check Python ─────────────────────────────────────────────
-PYTHON_CMD=""
-for cmd in python3 python; do
-    if command -v "$cmd" &>/dev/null; then
-        PY_VERSION=$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-        PY_MAJOR=$($cmd -c 'import sys; print(sys.version_info.major)')
-        if [ "$PY_MAJOR" -ge 3 ]; then
-            PYTHON_CMD="$cmd"
-            echo -e "  Python:   ${GREEN}${PY_VERSION} ✓${RESET}"
-            break
+detect_platform() {
+    OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    ARCH="$(uname -m)"
+
+    case "$OS" in
+        linux)
+            OS="linux"
+            ;;
+        darwin)
+            OS="macos"
+            ;;
+        *)
+            # Check for Termux
+            if [ -n "$TERMUX_VERSION" ]; then
+                OS="linux"
+            else
+                error "Unsupported OS: $OS"
+                exit 1
+            fi
+            ;;
+    esac
+
+    case "$ARCH" in
+        x86_64|amd64)
+            ARCH="x86_64"
+            ;;
+        aarch64|arm64)
+            ARCH="arm64"
+            ;;
+        armv7l|armv7)
+            ARCH="armv7"
+            ;;
+        *)
+            error "Unsupported architecture: $ARCH"
+            exit 1
+            ;;
+    esac
+
+    # Termux detection
+    if [ -n "$TERMUX_VERSION" ]; then
+        INSTALL_DIR="$HOME/.simpl"
+        BIN_DIR="$HOME/.local/bin"
+        OS="linux"
+    fi
+}
+
+get_latest_version() {
+    local version
+    version=$(curl -sSL "$GITHUB_API/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+    if [ -z "$version" ]; then
+        version="v1.0.0"
+    fi
+    echo "$version"
+}
+
+download_binary() {
+    local version="$1"
+    local filename="simpl-${OS}-${ARCH}"
+
+    # Map platform to release asset name
+    local asset_name
+    case "$OS-$ARCH" in
+        linux-x86_64)  asset_name="simpl-linux-x86_64" ;;
+        linux-arm64)   asset_name="simpl-linux-arm64" ;;
+        linux-armv7)   asset_name="simpl-linux-armv7" ;;
+        macos-x86_64)  asset_name="simpl-macos-x86_64" ;;
+        macos-arm64)   asset_name="simpl-macos-arm64" ;;
+        *)             asset_name="simpl-${OS}-${ARCH}" ;;
+    esac
+
+    local download_url="https://github.com/$REPO/releases/download/${version}/${asset_name}"
+
+    echo -e "${CYAN}[↓]${RESET} Downloading SimPL ${version} for ${OS}-${ARCH}..."
+
+    mkdir -p "$INSTALL_DIR"
+
+    # Try downloading from GitHub Releases
+    if curl -sSL -f -o "$INSTALL_DIR/simpl" "$download_url" 2>/dev/null; then
+        chmod +x "$INSTALL_DIR/simpl"
+        info "Downloaded successfully"
+        return 0
+    fi
+
+    # Fallback: build from source if Rust is available
+    warn "Pre-built binary not available for ${OS}-${ARCH}"
+    warn "Attempting to build from source..."
+
+    if command -v cargo &>/dev/null; then
+        build_from_source "$version"
+        return 0
+    fi
+
+    error "No pre-built binary available and Rust/Cargo not found."
+    echo ""
+    echo -e "  Install Rust first:  ${CYAN}curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh${RESET}"
+    echo -e "  Then re-run:         ${CYAN}curl -sSL https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.sh | bash${RESET}"
+    exit 1
+}
+
+build_from_source() {
+    local version="$1"
+    echo -e "${CYAN}[⚒]${RESET} Building SimPL from source..."
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    cd "$tmp_dir"
+
+    git clone "https://github.com/$REPO.git" simpl-src 2>/dev/null || {
+        error "Failed to clone repository"
+        rm -rf "$tmp_dir"
+        exit 1
+    }
+
+    cd simpl-src
+    cargo build --release 2>/dev/null || {
+        error "Build failed"
+        rm -rf "$tmp_dir"
+        exit 1
+    }
+
+    cp "target/release/simpl" "$INSTALL_DIR/simpl"
+    chmod +x "$INSTALL_DIR/simpl"
+
+    rm -rf "$tmp_dir"
+    info "Built successfully from source"
+}
+
+create_wrapper() {
+    mkdir -p "$BIN_DIR"
+
+    # Create wrapper script
+    cat > "$BIN_DIR/simpl" << 'WRAPPER'
+#!/usr/bin/env bash
+exec "$HOME/.simpl/simpl" "$@"
+WRAPPER
+    chmod +x "$BIN_DIR/simpl"
+
+    # Also create simpl-studio alias
+    cat > "$BIN_DIR/simpl-studio" << 'WRAPPER'
+#!/usr/bin/env bash
+exec "$HOME/.simpl/simpl" studio "$@"
+WRAPPER
+    chmod +x "$BIN_DIR/simpl-studio"
+}
+
+add_to_path() {
+    local shell_rc=""
+
+    if [ -n "$BASH_VERSION" ]; then
+        shell_rc="$HOME/.bashrc"
+    elif [ -n "$ZSH_VERSION" ]; then
+        shell_rc="$HOME/.zshrc"
+    elif [ -f "$HOME/.bashrc" ]; then
+        shell_rc="$HOME/.bashrc"
+    elif [ -f "$HOME/.zshrc" ]; then
+        shell_rc="$HOME/.zshrc"
+    fi
+
+    # Termux
+    if [ -n "$TERMUX_VERSION" ]; then
+        shell_rc="$HOME/.bashrc"
+    fi
+
+    if [ -n "$shell_rc" ]; then
+        if ! grep -q '.local/bin' "$shell_rc" 2>/dev/null; then
+            echo '' >> "$shell_rc"
+            echo '# SimPL - added by installer' >> "$shell_rc"
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
         fi
     fi
-done
 
-if [ -z "$PYTHON_CMD" ]; then
-    echo -e "  ${RED}Python 3.8+ is required but not found!${RESET}"
+    # Ensure PATH for current session
+    export PATH="$BIN_DIR:$PATH"
+}
+
+# Main installation
+main() {
+    print_banner
+
+    detect_platform
+    echo -e "  Platform: ${BOLD}${OS}-${ARCH}${RESET}"
     echo ""
-    echo "  Install Python:"
-    if [ "$PLATFORM" = "termux" ]; then
-        echo "    pkg install python"
-    elif [ "$PLATFORM" = "linux" ]; then
-        echo "    sudo apt install python3    # Debian/Ubuntu"
-        echo "    sudo dnf install python3    # Fedora"
-    elif [ "$PLATFORM" = "macos" ]; then
-        echo "    brew install python3"
+
+    # Get latest version
+    VERSION=$(get_latest_version)
+    echo -e "  Version: ${BOLD}${VERSION}${RESET}"
+    echo ""
+
+    # Download or build
+    download_binary "$VERSION"
+
+    # Create wrapper scripts
+    create_wrapper
+
+    # Add to PATH
+    add_to_path
+
+    # Verify installation
+    if command -v simpl &>/dev/null; then
+        echo ""
+        info "SimPL installed successfully!"
+        echo ""
+        echo -e "  ${BOLD}Commands:${RESET}"
+        echo -e "    simpl run <file>      Run a SimPL file"
+        echo -e "    simpl repl            Interactive REPL"
+        echo -e "    simpl studio          SimPL Studio (TUI IDE)"
+        echo -e "    simpl install <pkg>   Install a package"
+        echo -e "    simpl update          Update packages"
+        echo -e "    simpl list            List packages"
+        echo ""
+        echo -e "  ${BOLD}Quick start:${RESET}"
+        echo -e "    ${CYAN}simpl repl${RESET}           # Open interactive REPL"
+        echo -e '    ${CYAN}say "Hello!"${RESET}        # In REPL, print a value'
+        echo ""
+
+        # Try running simpl --version
+        "$INSTALL_DIR/simpl" --version 2>/dev/null || true
+
+        if [ -n "$TERMUX_VERSION" ]; then
+            echo -e "  ${YELLOW}Note: Run 'source ~/.bashrc' or restart your terminal${RESET}"
+        else
+            echo -e "  ${YELLOW}Note: Run 'source ~/.bashrc' (or ~/.zshrc) or restart your terminal${RESET}"
+        fi
+    else
+        error "Installation verification failed"
+        echo "  Try running: $INSTALL_DIR/simpl --version"
+        exit 1
     fi
-    exit 1
-fi
+}
 
-# ── Check Node.js (optional) ─────────────────────────────────
-if command -v node &>/dev/null; then
-    NODE_VER=$(node --version)
-    echo -e "  Node.js:  ${GREEN}${NODE_VER} ✓${RESET} (NPM Bridge available)"
-else
-    echo -e "  Node.js:  ${DIM}Not found (optional, for NPM Bridge)${RESET}"
-fi
-
-# ── Clone or update ──────────────────────────────────────────
-INSTALL_DIR="$HOME/.simpl"
-
-if [ -d "$INSTALL_DIR" ]; then
-    echo ""
-    echo -e "  ${YELLOW}SimPL directory already exists at $INSTALL_DIR${RESET}"
-    echo -e "  Updating..."
-    cd "$INSTALL_DIR"
-    git pull -q 2>/dev/null || echo -e "  ${DIM}(Could not update via git)${RESET}"
-else
-    echo ""
-    echo -e "  Cloning SimPL repository..."
-    git clone -q https://github.com/TheStrongestOfTomorrow/SimPL.git "$INSTALL_DIR"
-fi
-
-echo -e "  ${GREEN}✓${RESET} SimPL downloaded to $INSTALL_DIR"
-
-# ── Create launcher ──────────────────────────────────────────
-BIN_DIR=""
-if [ "$PLATFORM" = "termux" ]; then
-    BIN_DIR="$PREFIX/bin"
-elif [ "$PLATFORM" = "macos" ]; then
-    BIN_DIR="/usr/local/bin"
-    mkdir -p "$BIN_DIR" 2>/dev/null || BIN_DIR="$HOME/.local/bin"
-elif [ "$PLATFORM" = "linux" ]; then
-    BIN_DIR="$HOME/.local/bin"
-    mkdir -p "$BIN_DIR"
-fi
-
-# Create the simpl launcher script
-LAUNCHER="$BIN_DIR/simpl"
-cat > "$LAUNCHER" << EOF
-#!/usr/bin/env bash
-# SimPL Launcher - Auto-generated
-SIMPL_DIR="$INSTALL_DIR"
-
-if [ \$# -eq 0 ]; then
-    exec $PYTHON_CMD "\$SIMPL_DIR/simpl.py" --tui
-else
-    exec $PYTHON_CMD "\$SIMPL_DIR/simpl.py" "\$@"
-fi
-EOF
-chmod +x "$LAUNCHER"
-
-# Also create simpl-tui
-TUI_LAUNCHER="$BIN_DIR/simpl-tui"
-cat > "$TUI_LAUNCHER" << EOF
-#!/usr/bin/env bash
-exec $PYTHON_CMD "$INSTALL_DIR/simpl.py" --tui "\$@"
-EOF
-chmod +x "$TUI_LAUNCHER"
-
-echo -e "  ${GREEN}✓${RESET} Created launcher: $LAUNCHER"
-
-# ── PATH check ───────────────────────────────────────────────
-if echo ":$PATH:" | grep -q ":$BIN_DIR:"; then
-    echo -e "  ${GREEN}✓${RESET} $BIN_DIR is in PATH"
-else
-    echo -e "  ${YELLOW}⚠ $BIN_DIR is not in PATH${RESET}"
-    SHELL_RC="$HOME/.bashrc"
-    if echo "$SHELL" | grep -q "zsh"; then
-        SHELL_RC="$HOME/.zshrc"
-    fi
-    echo "" >> "$SHELL_RC"
-    echo "# SimPL" >> "$SHELL_RC"
-    echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$SHELL_RC"
-    echo -e "  Added $BIN_DIR to $SHELL_RC"
-    echo -e "  Run: ${BOLD}source $SHELL_RC${RESET}"
-fi
-
-# ── Done ─────────────────────────────────────────────────────
-echo ""
-echo -e "${CYAN}═══════════════════════════════════════════════════${RESET}"
-echo -e "  ${GREEN}${BOLD}Installation complete!${RESET}"
-echo ""
-echo "  Usage:"
-echo "    simpl                    Launch the TUI"
-echo "    simpl run hello.simpl    Run a script"
-echo "    simpl --repl             Interactive REPL"
-echo "    simpl install super-math Install a package"
-echo ""
-echo "  Getting started:"
-echo "    simpl                    # Launch TUI and explore!"
-echo -e "${CYAN}═══════════════════════════════════════════════════${RESET}"
-echo ""
+main "$@"

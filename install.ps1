@@ -1,114 +1,132 @@
-# ═══════════════════════════════════════════════════════════════
-# SimPL Quick Install Script for Windows
-# Usage:   irm https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.ps1 | iex
-#          OR:  .\install.ps1
-# ═══════════════════════════════════════════════════════════════
+# SimPL Installer for Windows - GitHub Only
+# Install: irm https://raw.githubusercontent.com/TheStrongestOfTomorrow/SimPL/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
-Write-Host ""
-Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  SimPL - Windows Installer" -ForegroundColor Cyan
-Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host ""
+$REPO = "TheStrongestOfTomorrow/SimPL"
+$GITHUB_API = "https://api.github.com/repos/$REPO"
+$INSTALL_DIR = "$env:USERPROFILE\.simpl"
+$BIN_DIR = "$env:APPDATA\SimPL"
 
-# ── Check Python ──────────────────────────────────────────────
-$pythonCmd = $null
-foreach ($cmd in @("python", "python3", "py")) {
-    try {
-        $ver = & $cmd --version 2>&1
-        if ($ver -match "Python (\d+)\.(\d+)") {
-            $major = [int]$Matches[1]
-            $minor = [int]$Matches[2]
-            if ($major -ge 3 -and $minor -ge 8) {
-                $pythonCmd = $cmd
-                Write-Host "  Python:   $ver ✓" -ForegroundColor Green
-                break
-            }
-        }
-    } catch {}
+function Print-Banner {
+    Write-Host ""
+    Write-Host "  ____                  _ _____           " -ForegroundColor Cyan
+    Write-Host " / ___|  ___  _ __  __| |_   _| __ __ _  ___ " -ForegroundColor Cyan
+    Write-Host " \___ \ / _ \| '_ \/ _` | | || '__/ _` |/ _ \" -ForegroundColor Cyan
+    Write-Host "  ___) | (_) | | | (_| | | || | | (_| |  __/" -ForegroundColor Cyan
+    Write-Host " |____/ \___/|_|  \__,_| |_||_|  \__,_|\___|" -ForegroundColor Cyan
+    Write-Host "                    v1.0.0" -ForegroundColor White
+    Write-Host ""
 }
 
-if (-not $pythonCmd) {
-    Write-Host "  Python 3.8+ is required but not found!" -ForegroundColor Red
+function Get-LatestVersion {
+    try {
+        $release = Invoke-RestMethod -Uri "$GITHUB_API/releases/latest" -ErrorAction Stop
+        return $release.tag_name
+    } catch {
+        return "v1.0.0"
+    }
+}
+
+function Download-Binary {
+    param([string]$Version)
+
+    $arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "x86" }
+    $assetName = "simpl-windows-$arch.exe"
+    $downloadUrl = "https://github.com/$REPO/releases/download/$Version/$assetName"
+
+    Write-Host "  [↓] Downloading SimPL $Version for windows-$arch..." -ForegroundColor Cyan
+
+    New-Item -ItemType Directory -Force -Path $INSTALL_DIR | Out-Null
+    $targetPath = Join-Path $INSTALL_DIR "simpl.exe"
+
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -ErrorAction Stop
+        Write-Host "  [✓] Downloaded successfully" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Host "  [!] Pre-built binary not available for windows-$arch" -ForegroundColor Yellow
+        Write-Host "  [!] Attempting to build from source..." -ForegroundColor Yellow
+        return Build-FromSource -Version $Version
+    }
+}
+
+function Build-FromSource {
+    param([string]$Version)
+
+    if (Get-Command cargo -ErrorAction SilentlyContinue) {
+        Write-Host "  [⚒] Building SimPL from source..." -ForegroundColor Cyan
+
+        $tmpDir = Join-Path $env:TEMP "simpl-build"
+        New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+
+        Push-Location $tmpDir
+        git clone "https://github.com/$REPO.git" simpl-src 2>$null
+        Set-Location "simpl-src"
+        cargo build --release 2>$null
+        Copy-Item "target\release\simpl.exe" (Join-Path $INSTALL_DIR "simpl.exe") -Force
+        Pop-Location
+
+        Remove-Item -Recurse -Force $tmpDir
+        Write-Host "  [✓] Built successfully from source" -ForegroundColor Green
+        return $true
+    } else {
+        Write-Host "  [✖] No pre-built binary and Rust not found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  Install Rust: https://rustup.rs/" -ForegroundColor Cyan
+        return $false
+    }
+}
+
+function Add-ToPath {
+    New-Item -ItemType Directory -Force -Path $BIN_DIR | Out-Null
+
+    # Create wrapper batch file
+    $wrapperPath = Join-Path $BIN_DIR "simpl.bat"
+    $simplExe = Join-Path $INSTALL_DIR "simpl.exe"
+    "@echo off`n`"$simplExe`" %*" | Set-Content $wrapperPath
+
+    # Create studio wrapper
+    $studioPath = Join-Path $BIN_DIR "simpl-studio.bat"
+    "@echo off`n`"$simplExe`" studio %*" | Set-Content $studioPath
+
+    # Add to user PATH if not already there
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($userPath -notlike "*$BIN_DIR*") {
+        [Environment]::SetEnvironmentVariable("Path", "$userPath;$BIN_DIR", "User")
+    }
+
+    $env:Path += ";$BIN_DIR"
+}
+
+# Main
+Print-Banner
+
+$arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "x86" }
+Write-Host "  Platform: windows-$arch" -ForegroundColor White
+
+$version = Get-LatestVersion
+Write-Host "  Version: $version" -ForegroundColor White
+Write-Host ""
+
+if (Download-Binary -Version $version) {
+    Add-ToPath
+
     Write-Host ""
-    Write-Host "  Install Python from: https://www.python.org/downloads/"
-    Write-Host "  Make sure to check 'Add Python to PATH' during installation."
+    Write-Host "  [✓] SimPL installed successfully!" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Commands:" -ForegroundColor White
+    Write-Host "    simpl run <file>      Run a SimPL file"
+    Write-Host "    simpl repl            Interactive REPL"
+    Write-Host "    simpl studio          SimPL Studio (TUI IDE)"
+    Write-Host "    simpl install <pkg>   Install a package"
+    Write-Host ""
+    Write-Host "  Quick start:" -ForegroundColor White
+    Write-Host "    simpl repl" -ForegroundColor Cyan
+    Write-Host '    say "Hello!"' -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Note: Restart your terminal to use 'simpl' command" -ForegroundColor Yellow
+} else {
+    Write-Host "  Installation failed." -ForegroundColor Red
     exit 1
 }
-
-# ── Check Node.js (optional) ──────────────────────────────────
-try {
-    $nodeVer = & node --version 2>&1
-    Write-Host "  Node.js:  $nodeVer ✓ (NPM Bridge available)" -ForegroundColor Green
-} catch {
-    Write-Host "  Node.js:  Not found (optional, for NPM Bridge)" -ForegroundColor DarkGray
-}
-
-# ── Clone or update ───────────────────────────────────────────
-$installDir = "$env:USERPROFILE\.simpl"
-
-if (Test-Path $installDir) {
-    Write-Host ""
-    Write-Host "  SimPL directory already exists at $installDir" -ForegroundColor Yellow
-    Write-Host "  Updating..."
-    Push-Location $installDir
-    git pull -q 2>$null
-    Pop-Location
-} else {
-    Write-Host ""
-    Write-Host "  Cloning SimPL repository..."
-    git clone -q https://github.com/TheStrongestOfTomorrow/SimPL.git $installDir
-}
-
-Write-Host "  ✓ SimPL downloaded to $installDir" -ForegroundColor Green
-
-# ── Create launcher ───────────────────────────────────────────
-$binDir = "$env:APPDATA\SimPL"
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-
-# Create simpl.bat
-$batContent = @"
-@echo off
-REM SimPL Launcher - Auto-generated
-if [%1]==[] (
-    $pythonCmd "$installDir\simpl.py" --tui %*
-) else (
-    $pythonCmd "$installDir\simpl.py" %*
-)
-"@
-
-Set-Content -Path "$binDir\simpl.bat" -Value $batContent -Force
-Write-Host "  ✓ Created launcher: $binDir\simpl.bat" -ForegroundColor Green
-
-# ── Add to PATH ───────────────────────────────────────────────
-$pathParts = $env:PATH -split ";"
-if ($pathParts -notcontains $binDir) {
-    $env:PATH = "$binDir;$env:PATH"
-    # Persist for future sessions
-    try {
-        [Environment]::SetEnvironmentVariable("PATH", "$binDir;" + [Environment]::GetEnvironmentVariable("PATH", "User"), "User")
-        Write-Host "  ✓ Added $binDir to PATH" -ForegroundColor Green
-    } catch {
-        Write-Host "  ⚠ Could not add to PATH automatically." -ForegroundColor Yellow
-        Write-Host "    Add $binDir to your PATH manually."
-    }
-} else {
-    Write-Host "  ✓ $binDir is already in PATH" -ForegroundColor Green
-}
-
-# ── Done ──────────────────────────────────────────────────────
-Write-Host ""
-Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Installation complete!" -ForegroundColor Green
-Write-Host ""
-Write-Host "  Usage:"
-Write-Host "    simpl                    Launch the TUI"
-Write-Host "    simpl run hello.simpl    Run a script"
-Write-Host "    simpl --repl             Interactive REPL"
-Write-Host "    simpl install super-math Install a package"
-Write-Host ""
-Write-Host "  Getting started:"
-Write-Host "    simpl                    # Launch TUI and explore!"
-Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host ""

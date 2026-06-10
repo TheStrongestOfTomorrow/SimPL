@@ -1,0 +1,87 @@
+# SimPL Language Demo
+
+# Variables and output
+set x = 42
+say x
+
+# String operations
+set name = "SimPL"
+say "Hello, " + name + "!"
+
+# Math
+say 10 + 5 * 2
+say 2 ** 10
+
+# Lists
+set fruits = ["apple", "banana", "cherry"]
+say fruits
+say len(fruits)
+
+# For loop with braces
+for fruit in fruits {
+  say "I like " + fruit
+}
+
+# Dict
+set person = {name: "Alice", age: 30}
+say person.name
+say person.age
+
+# Function with braces
+func greet(name) {
+  say "Hello, " + name + "!"
+}
+greet("World")
+
+# While loop with braces
+set i = 0
+while i < 5 {
+  say i
+  set i = i + 1
+}
+
+# Range
+for n in range(5) {
+  say n
+}
+
+# Method calls
+set msg = "Hello World"
+say msg.upper()
+say msg.lower()
+say msg.split(" ")
+
+# Try/catch
+try {
+  raise "Something went wrong"
+}
+catch err {
+  say "Caught: " + err
+}
+
+# Conditional
+set score = 85
+if score >= 90 {
+  say "A"
+} elif score >= 80 {
+  say "B"
+} elif score >= 70 {
+  say "C"
+} else {
+  say "F"
+}
+
+# JSON
+set data = json_parse('{"name": "SimPL", "version": 1}')
+say data.name
+say json_stringify(data)
+
+# More features
+say type(42)
+say type("hello")
+say abs(-5)
+say sqrt(16)
+say pow(2, 8)
+say [1, 2, 3].reverse()
+say [3, 1, 2].sort()
+say "hello world".contains("world")
